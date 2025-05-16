@@ -3,14 +3,15 @@ from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, 
     QLabel, QLineEdit, QTextEdit, QDialog, QDialogButtonBox,
-    QComboBox, QGroupBox, QApplication, QTableWidget, QTableWidgetItem,
+    QComboBox, QGroupBox, QApplication, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QSpinBox
 )
 from qfluentwidgets import (
     LineEdit, ComboBox, TextEdit, PrimaryPushButton, 
     PushButton, CardWidget, FluentIcon, InfoBar,
     InfoBarPosition, setTheme, Theme, MessageBox, IconWidget,
-    EditableComboBox
+    EditableComboBox, SubtitleLabel, BodyLabel, SpinBox,
+    TableWidget, TitleLabel
 )
 import datetime
 
@@ -34,14 +35,21 @@ class EmployeeDetailView(QDialog):
     
     def initUI(self):
         """初始化UI"""
+        # 创建主布局
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
         
-        # 标题
-        self.title_label = QLabel("员工详情")
-        self.title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        main_layout.addWidget(self.title_label)
+        # 标题卡片
+        title_layout = QHBoxLayout()
+        
+        # 使用标题标签
+        self.title_label = TitleLabel("员工详情")
+        title_layout.addWidget(self.title_label)
+        
+        title_layout.addStretch(1)
+        
+        main_layout.addLayout(title_layout)
         
         # 基本信息卡片 - 使用更紧凑的布局
         basic_info_card = CardWidget(self)
@@ -130,8 +138,7 @@ class EmployeeDetailView(QDialog):
         # 标题和添加按钮所在的水平布局
         grade_title_layout = QHBoxLayout()
         
-        grade_label = QLabel("职级历史")
-        grade_label.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+        grade_label = TitleLabel("职级历史")
         grade_title_layout.addWidget(grade_label)
         
         grade_title_layout.addStretch(1)
@@ -145,7 +152,7 @@ class EmployeeDetailView(QDialog):
         grade_layout.addLayout(grade_title_layout)
         
         # 职级历史表格 - 改进表格显示
-        self.grade_table = QTableWidget(self)
+        self.grade_table = TableWidget(self)
         self.grade_table.setColumnCount(4)
         self.grade_table.setHorizontalHeaderLabels(["年份", "职级", "备注", "操作"])
         self.grade_table.setMinimumHeight(150)  # 设置最小高度，确保表格有足够空间
@@ -170,8 +177,7 @@ class EmployeeDetailView(QDialog):
         notes_layout = QVBoxLayout(notes_card)
         notes_layout.setContentsMargins(20, 15, 20, 15)  # 减小内边距
         
-        notes_label = QLabel("备注信息")
-        notes_label.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+        notes_label = TitleLabel("备注信息")
         notes_layout.addWidget(notes_label)
         
         self.notes_edit = TextEdit(self)
@@ -525,8 +531,7 @@ class GradeDialog(QDialog):
         layout.setSpacing(15)
         
         # 添加说明文本
-        info_label = QLabel("请填写员工职级信息", self)
-        info_label.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
+        info_label = SubtitleLabel("请填写员工职级信息", self)
         layout.addWidget(info_label)
         
         # 年份选择器
@@ -539,19 +544,17 @@ class GradeDialog(QDialog):
         
         current_year = datetime.datetime.now().year
         
-        self.year_spin = QSpinBox(self)
+        self.year_spin = SpinBox(self)
         self.year_spin.setRange(2000, current_year + 10)  # 允许设置未来几年
         self.year_spin.setValue(current_year)
         self.year_spin.setFixedWidth(120)
-        self.year_spin.setStyleSheet("QSpinBox { font-size: 14px; height: 30px; }")
-        year_card_layout.addRow("年份:", self.year_spin)
+        year_card_layout.addRow(BodyLabel("年份:"), self.year_spin)
         
         # 职级选择
         self.grade_combo = EditableComboBox(self)
         self.grade_combo.addItems(["G1", "G2", "G3", "G4A", "G4B", "Technian"])
         self.grade_combo.setFixedWidth(120)
-        self.grade_combo.setStyleSheet("QComboBox { font-size: 14px; height: 30px; }")
-        year_card_layout.addRow("职级:", self.grade_combo)
+        year_card_layout.addRow(BodyLabel("职级:"), self.grade_combo)
         
         layout.addWidget(year_card)
         
@@ -562,8 +565,7 @@ class GradeDialog(QDialog):
         comment_layout.setContentsMargins(15, 15, 15, 15)
         comment_layout.setSpacing(10)
         
-        comment_label = QLabel("备注:", self)
-        comment_label.setFont(QFont("Microsoft YaHei", 10))
+        comment_label = BodyLabel("备注:", self)
         comment_layout.addWidget(comment_label)
         
         self.comment_edit = TextEdit(self)

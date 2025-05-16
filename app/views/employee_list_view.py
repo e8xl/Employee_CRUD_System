@@ -10,7 +10,8 @@ from qfluentwidgets import (
     ComboBox, CardWidget, TableWidget, ToolButton, 
     FluentIcon as FIF, TransparentToolButton, SubtitleLabel,
     ToolTipFilter, ToolTipPosition, ScrollArea, Dialog, 
-    MessageBoxBase, StateToolTip, LineEdit, TextEdit, MessageBox
+    MessageBoxBase, StateToolTip, LineEdit, TextEdit, MessageBox,
+    BodyLabel, StrongBodyLabel, SpinBox, EditableComboBox
 )
 from ..utils.resource_loader import get_resource_path
 import datetime
@@ -528,8 +529,7 @@ class EmployeeListView(QWidget):
                     self.name_edit.setPlaceholderText("请输入姓名")
                     
                     # 部门下拉框
-                    self.department_edit = QComboBox(self)
-                    self.department_edit.setEditable(True)
+                    self.department_edit = EditableComboBox(self)
                     self.department_edit.setPlaceholderText("请选择或输入部门")
                     
                     # 初始职级下拉框
@@ -546,8 +546,7 @@ class EmployeeListView(QWidget):
                     # 年份选择器
                     current_year = datetime.datetime.now().year
                     
-                    from PyQt5.QtWidgets import QSpinBox
-                    self.year_spin = QSpinBox(grade_container)
+                    self.year_spin = SpinBox(grade_container)
                     self.year_spin.setRange(2000, current_year + 10)
                     self.year_spin.setValue(current_year)
                     grade_layout.addWidget(self.year_spin)
@@ -577,13 +576,13 @@ class EmployeeListView(QWidget):
                     self.notes_edit.setMaximumHeight(100)
                     
                     # 添加到表单布局
-                    self.form_layout.addRow("工号:", self.emp_no_edit)
-                    self.form_layout.addRow("GID:", self.gid_edit)
-                    self.form_layout.addRow("姓名:", self.name_edit)
-                    self.form_layout.addRow("部门:", self.department_edit)
-                    self.form_layout.addRow("当前职级:", grade_container)
-                    self.form_layout.addRow("状态:", self.status_container)
-                    self.form_layout.addRow("备注:", self.notes_edit)
+                    self.form_layout.addRow(BodyLabel("工号:"), self.emp_no_edit)
+                    self.form_layout.addRow(BodyLabel("GID:"), self.gid_edit)
+                    self.form_layout.addRow(BodyLabel("姓名:"), self.name_edit)
+                    self.form_layout.addRow(BodyLabel("部门:"), self.department_edit)
+                    self.form_layout.addRow(BodyLabel("当前职级:"), grade_container)
+                    self.form_layout.addRow(BodyLabel("状态:"), self.status_container)
+                    self.form_layout.addRow(BodyLabel("备注:"), self.notes_edit)
                     
                     self.main_layout.addLayout(self.form_layout)
                     

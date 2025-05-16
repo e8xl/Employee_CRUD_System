@@ -1,12 +1,13 @@
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, 
-    QLabel, QScrollArea, QSplitter, QFrame
+    QScrollArea, QSplitter, QFrame
 )
 from PyQt5.QtGui import QFont
 from qfluentwidgets import (
     ComboBox, PushButton, CardWidget, FluentIcon, 
-    InfoBar, InfoBarPosition, ToolButton, ScrollArea
+    InfoBar, InfoBarPosition, ToolButton, ScrollArea,
+    TitleLabel, BodyLabel, SubtitleLabel
 )
 from app.utils.chart_generator import ChartGenerator, MatplotlibCanvas
 import matplotlib.pyplot as plt
@@ -40,8 +41,7 @@ class StatisticsView(QWidget):
         top_bar = QHBoxLayout()
         
         # 标题
-        title_label = QLabel("统计分析")
-        title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
+        title_label = TitleLabel("统计分析")
         top_bar.addWidget(title_label)
         
         top_bar.addStretch()
@@ -53,7 +53,7 @@ class StatisticsView(QWidget):
         ])
         self.chart_type_combo.setCurrentIndex(0)
         self.chart_type_combo.currentIndexChanged.connect(self.onChartTypeChanged)
-        top_bar.addWidget(QLabel("图表类型:"))
+        top_bar.addWidget(BodyLabel("图表类型:"))
         top_bar.addWidget(self.chart_type_combo)
         
         # 年份选择（针对职级分布和晋升分析）
@@ -61,7 +61,7 @@ class StatisticsView(QWidget):
         self.year_combo.addItems(["2020", "2021", "2022", "2023", "2024", "2025"])
         self.year_combo.setCurrentText("2024")  # 默认选择当前年份
         self.year_combo.currentTextChanged.connect(self.updateChart)
-        top_bar.addWidget(QLabel("年份:"))
+        top_bar.addWidget(BodyLabel("年份:"))
         top_bar.addWidget(self.year_combo)
         
         # 刷新按钮
@@ -105,8 +105,7 @@ class StatisticsView(QWidget):
         data_card_layout.setContentsMargins(15, 15, 15, 15)
         
         # 数据标题
-        data_title = QLabel("数据摘要")
-        data_title.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+        data_title = SubtitleLabel("数据摘要")
         data_card_layout.addWidget(data_title)
         
         # 数据内容区域（使用滚动区域）
@@ -237,14 +236,13 @@ class StatisticsView(QWidget):
         item_layout.setContentsMargins(0, 0, 0, 0)
         
         # 标签
-        label_widget = QLabel(label)
-        label_widget.setFont(QFont("Microsoft YaHei", 10))
+        label_widget = BodyLabel(label)
         item_layout.addWidget(label_widget)
         
         item_layout.addStretch()
         
         # 值
-        value_widget = QLabel(str(value))
+        value_widget = BodyLabel(str(value))
         value_widget.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
         item_layout.addWidget(value_widget)
         
