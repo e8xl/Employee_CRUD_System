@@ -1,12 +1,13 @@
 from PyQt5.QtCore import Qt, QDateTime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QTableView, QHeaderView, QDateEdit
+    QTableView, QHeaderView
 )
 from PyQt5.QtGui import QFont, QStandardItemModel, QStandardItem
 from qfluentwidgets import (
     LineEdit, PushButton, CardWidget, FluentIcon, 
-    InfoBar, InfoBarPosition, SearchLineEdit, ComboBox
+    InfoBar, InfoBarPosition, SearchLineEdit, ComboBox,
+    CalendarPicker
 )
 import datetime
 
@@ -54,22 +55,31 @@ class OperationLogsView(QWidget):
         self.operation_filter.setFixedWidth(150)
         top_bar.addWidget(self.operation_filter)
         
-        # 日期范围
-        self.start_date = QDateEdit(self)
-        self.start_date.setDisplayFormat("yyyy-MM-dd")
-        self.start_date.setDate(QDateTime.currentDateTime().addDays(-30).date())
-        self.start_date.setCalendarPopup(True)
-        self.start_date.dateChanged.connect(self.filterLogs)
-        top_bar.addWidget(QLabel("从:"))
-        top_bar.addWidget(self.start_date)
+        # 日期范围 - 使用FluentUI风格的日期选择器
+        date_container = QWidget(self)
+        date_layout = QHBoxLayout(date_container)
+        date_layout.setContentsMargins(0, 0, 0, 0)
+        date_layout.setSpacing(5)
         
-        self.end_date = QDateEdit(self)
-        self.end_date.setDisplayFormat("yyyy-MM-dd")
-        self.end_date.setDate(QDateTime.currentDateTime().date())
-        self.end_date.setCalendarPopup(True)
-        self.end_date.dateChanged.connect(self.filterLogs)
-        top_bar.addWidget(QLabel("到:"))
-        top_bar.addWidget(self.end_date)
+        date_label_from = QLabel("从:", self)
+        date_layout.addWidget(date_label_from)
+        
+        # 开始日期选择器
+        self.start_date_picker = CalendarPicker(self)
+        self.start_date_picker.setDate(QDateTime.currentDateTime().addDays(-30).date())
+        self.start_date_picker.dateChanged.connect(self.filterLogs)
+        date_layout.addWidget(self.start_date_picker)
+        
+        date_label_to = QLabel("到:", self)
+        date_layout.addWidget(date_label_to)
+        
+        # 结束日期选择器
+        self.end_date_picker = CalendarPicker(self)
+        self.end_date_picker.setDate(QDateTime.currentDateTime().date())
+        self.end_date_picker.dateChanged.connect(self.filterLogs)
+        date_layout.addWidget(self.end_date_picker)
+        
+        top_bar.addWidget(date_container)
         
         # 刷新按钮
         self.refresh_btn = PushButton('刷新', self)
@@ -204,8 +214,8 @@ class OperationLogsView(QWidget):
         """筛选日志"""
         search_text = self.search_edit.text().lower()
         operation_type = self.operation_filter.currentText()
-        start_date = self.start_date.date().toString("yyyy-MM-dd")
-        end_date = self.end_date.date().addDays(1).toString("yyyy-MM-dd")  # 加一天以包括结束当天
+        start_date = self.start_date_picker.getDate().toString("yyyy-MM-dd")
+        end_date = self.end_date_picker.getDate().addDays(1).toString("yyyy-MM-dd")  # 加一天以包括结束当天
         
         # 遍历所有行，根据筛选条件决定是否显示
         for row in range(self.model.rowCount()):
@@ -250,8 +260,8 @@ class OperationLogsView(QWidget):
         self.operation_filter.setCurrentText("所有操作")
         
         # 重置日期范围
-        self.start_date.setDate(QDateTime.currentDateTime().addDays(-30).date())
-        self.end_date.setDate(QDateTime.currentDateTime().date())
+        self.start_date_picker.setDate(QDateTime.currentDateTime().addDays(-30).date())
+        self.end_date_picker.setDate(QDateTime.currentDateTime().date())
         
         # 显示所有行
         for row in range(self.model.rowCount()):

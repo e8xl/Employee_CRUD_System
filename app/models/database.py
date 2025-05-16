@@ -17,9 +17,40 @@ class EmployeeDatabase:
             self.conn = sqlite3.connect(self.db_path)
             self.cursor = self.conn.cursor()
             print(f"成功连接到数据库: {self.db_path}")
+            
+            # 确保职级历史表存在
+            self._create_grade_history_table()
         except sqlite3.Error as e:
             print(f"数据库连接失败: {e}")
             
+    def _create_grade_history_table(self):
+        """创建职级历史表（如果不存在）"""
+        try:
+            self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS employee_grades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                grade TEXT NOT NULL,
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+                UNIQUE(employee_id, year)
+            )
+            ''')
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"创建职级历史表失败: {e}")
+            
+    def get_db_path(self):
+        """获取数据库路径"""
+        return self.db_path
+        
+    def close_connection(self):
+        """关闭数据库连接"""
+        self.close()
+        
     def close(self):
         """关闭数据库连接"""
         if self.conn:
@@ -98,8 +129,30 @@ class EmployeeDatabase:
             ))
             self.conn.commit()
             
+            # 获取新添加员工的ID
+            self.cursor.execute("SELECT last_insert_rowid()")
+            employee_id = self.cursor.fetchone()[0]
+            
+            # 构建详细的日志信息
+            details = []
+            field_names = {
+                'employee_no': '工号', 'gid': 'GID', 'name': '姓名', 
+                'status': '状态', 'department': '部门',
+                'grade_2020': '2020年职级', 'grade_2021': '2021年职级', 
+                'grade_2022': '2022年职级', 'grade_2023': '2023年职级', 
+                'grade_2024': '2024年职级', 'grade_2025': '2025年职级',
+                'notes': '备注'
+            }
+            
+            for key, label in field_names.items():
+                value = employee_data.get(key, '')
+                if value:  # 只记录非空值
+                    details.append(f"{label}: '{value}'")
+            
+            log_details = f"添加员工: {employee_data.get('name', '')} (ID: {employee_id}), 详细信息: {', '.join(details)}"
+            
             # 记录操作日志
-            self.log_operation(user, '添加员工', f"添加员工: {employee_data.get('name', '')}")
+            self.log_operation(user, '添加员工', log_details)
             return True
         except sqlite3.Error as e:
             print(f"添加员工失败: {e}")
@@ -108,6 +161,12 @@ class EmployeeDatabase:
     def update_employee(self, employee_id, updated_data, user="系统"):
         """更新员工信息"""
         try:
+            # 获取更新前的员工信息用于日志记录
+            self.cursor.execute("SELECT * FROM employees WHERE id = ?", (employee_id,))
+            old_data = dict(zip([desc[0] for desc in self.cursor.description], self.cursor.fetchone()))
+            if not old_data:
+                return False
+            
             # 构建SET部分的SQL语句
             set_clauses = []
             values = []
@@ -127,8 +186,18 @@ class EmployeeDatabase:
             self.cursor.execute(query, values)
             self.conn.commit()
             
+            # 构建详细的日志信息，记录修改的字段和修改前后的值
+            changes = []
+            for key, new_value in updated_data.items():
+                if key in old_data and old_data[key] != new_value:
+                    old_value = old_data[key]
+                    changes.append(f"{key}: '{old_value}' → '{new_value}'")
+            
+            change_details = ", ".join(changes)
+            log_details = f"更新员工: {old_data['name']} (ID: {employee_id}), 修改内容: {change_details}"
+            
             # 记录操作日志
-            self.log_operation(user, '更新员工信息', f"更新员工ID: {employee_id}")
+            self.log_operation(user, '更新员工信息', log_details)
             return True
         except sqlite3.Error as e:
             print(f"更新员工信息失败: {e}")
@@ -137,20 +206,48 @@ class EmployeeDatabase:
     def delete_employee(self, employee_id, user="系统"):
         """删除员工"""
         try:
-            # 先获取员工信息，用于日志记录
-            self.cursor.execute("SELECT name FROM employees WHERE id = ?", (employee_id,))
+            # 先获取员工完整信息，用于日志记录
+            self.cursor.execute("SELECT * FROM employees WHERE id = ?", (employee_id,))
             result = self.cursor.fetchone()
-            if result:
-                employee_name = result[0]
-                # 执行删除
-                self.cursor.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
-                self.conn.commit()
-                # 记录操作日志
-                self.log_operation(user, '删除员工', f"删除员工: {employee_name} (ID: {employee_id})")
-                return True
-            return False
+            
+            # 检查是否找到员工数据
+            if result is None:
+                print(f"未找到ID为{employee_id}的员工")
+                return False
+                
+            # 将查询结果转换为字典
+            columns = [desc[0] for desc in self.cursor.description]
+            employee_data = dict(zip(columns, result))
+            
+            # 构建详细的日志信息
+            details = []
+            field_names = {
+                'employee_no': '工号', 'gid': 'GID', 'name': '姓名', 
+                'status': '状态', 'department': '部门',
+                'grade_2020': '2020年职级', 'grade_2021': '2021年职级', 
+                'grade_2022': '2022年职级', 'grade_2023': '2023年职级', 
+                'grade_2024': '2024年职级', 'grade_2025': '2025年职级',
+                'notes': '备注'
+            }
+            
+            for key, label in field_names.items():
+                value = employee_data.get(key, '')
+                if value:  # 只记录非空值
+                    details.append(f"{label}: '{value}'")
+            
+            # 执行删除
+            self.cursor.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+            self.conn.commit()
+            
+            # 记录操作日志
+            log_details = f"删除员工: {employee_data['name']} (ID: {employee_id}), 删除的信息: {', '.join(details)}"
+            self.log_operation(user, '删除员工', log_details)
+            return True
         except sqlite3.Error as e:
             print(f"删除员工失败: {e}")
+            return False
+        except Exception as e:
+            print(f"删除员工时发生未知错误: {e}")
             return False
     
     def import_from_excel(self, file_path, user="系统"):
@@ -337,4 +434,114 @@ class EmployeeDatabase:
             print(f"恢复数据库失败: {e}")
             # 尝试重新连接
             self.connect()
-            return False 
+            return False
+    
+    def get_employee_grades(self, employee_id):
+        """获取员工的所有职级历史记录"""
+        try:
+            self.cursor.execute("""
+            SELECT * FROM employee_grades 
+            WHERE employee_id = ? 
+            ORDER BY year DESC
+            """, (employee_id,))
+            
+            columns = [desc[0] for desc in self.cursor.description]
+            grades = []
+            for row in self.cursor.fetchall():
+                grade = dict(zip(columns, row))
+                grades.append(grade)
+            return grades
+        except sqlite3.Error as e:
+            print(f"获取员工职级历史失败: {e}")
+            return []
+    
+    def add_employee_grade(self, employee_id, year, grade, comment="", user="系统"):
+        """添加或更新员工的特定年份职级"""
+        try:
+            # 尝试插入新记录，如果已存在则更新
+            self.cursor.execute("""
+            INSERT INTO employee_grades (employee_id, year, grade, comment)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(employee_id, year) 
+            DO UPDATE SET grade = ?, comment = ?, updated_at = CURRENT_TIMESTAMP
+            """, (employee_id, year, grade, comment, grade, comment))
+            
+            self.conn.commit()
+            
+            # 记录操作日志
+            employee_name = self.get_employee_name(employee_id)
+            log_details = f"更新员工职级: {employee_name} (ID: {employee_id}), {year}年职级: {grade}"
+            if comment:
+                log_details += f", 备注: {comment}"
+                
+            self.log_operation(user, '更新职级信息', log_details)
+            return True
+        except sqlite3.Error as e:
+            print(f"添加/更新员工职级失败: {e}")
+            return False
+    
+    def delete_employee_grade(self, grade_id, user="系统"):
+        """删除指定的职级记录"""
+        try:
+            # 先获取职级记录信息用于日志
+            self.cursor.execute("SELECT employee_id, year, grade FROM employee_grades WHERE id = ?", (grade_id,))
+            result = self.cursor.fetchone()
+            
+            if not result:
+                return False
+                
+            employee_id, year, grade = result
+            
+            # 执行删除
+            self.cursor.execute("DELETE FROM employee_grades WHERE id = ?", (grade_id,))
+            self.conn.commit()
+            
+            # 记录操作日志
+            employee_name = self.get_employee_name(employee_id)
+            log_details = f"删除员工职级记录: {employee_name} (ID: {employee_id}), {year}年职级: {grade}"
+            self.log_operation(user, '删除职级记录', log_details)
+            
+            return True
+        except sqlite3.Error as e:
+            print(f"删除员工职级记录失败: {e}")
+            return False
+    
+    def get_employee_name(self, employee_id):
+        """获取员工姓名"""
+        try:
+            self.cursor.execute("SELECT name FROM employees WHERE id = ?", (employee_id,))
+            result = self.cursor.fetchone()
+            return result[0] if result else "未知员工"
+        except sqlite3.Error as e:
+            print(f"获取员工姓名失败: {e}")
+            return "未知员工"
+            
+    def migrate_existing_grades(self):
+        """将现有表中的职级数据迁移到新的职级历史表中"""
+        try:
+            # 获取所有员工
+            employees = self.get_all_employees()
+            migrated_count = 0
+            
+            for employee in employees:
+                employee_id = employee['id']
+                
+                # 检查现有的年份职级数据
+                years = [2020, 2021, 2022, 2023, 2024, 2025]
+                for year in years:
+                    grade_field = f"grade_{year}"
+                    if grade_field in employee and employee[grade_field]:
+                        # 添加到新表中
+                        self.add_employee_grade(
+                            employee_id=employee_id,
+                            year=year,
+                            grade=employee[grade_field],
+                            comment="从旧数据迁移",
+                            user="系统"
+                        )
+                        migrated_count += 1
+            
+            return migrated_count
+        except Exception as e:
+            print(f"迁移职级数据失败: {e}")
+            return 0 

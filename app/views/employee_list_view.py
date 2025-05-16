@@ -1,16 +1,22 @@
-from PyQt5.QtCore import Qt, pyqtSignal, QSortFilterProxyModel
-from PyQt5.QtGui import QStandardItemModel, QStandardItem
+from PyQt5.QtCore import Qt, pyqtSignal, QSortFilterProxyModel, QSize
+from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon, QFont, QColor
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableView, 
-    QHeaderView, QPushButton, QMessageBox, QLabel
+    QWidget, QVBoxLayout, QHBoxLayout, 
+    QHeaderView, QMessageBox, QLabel, QFrame,
+    QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QTextEdit, QComboBox, QSpinBox
 )
 from qfluentwidgets import (
     SearchLineEdit, PushButton, InfoBar, InfoBarPosition,
-    ComboBox, CardWidget
+    ComboBox, CardWidget, TableWidget, ToolButton, 
+    FluentIcon as FIF, TransparentToolButton, SubtitleLabel,
+    ToolTipFilter, ToolTipPosition, ScrollArea, Dialog, 
+    MessageBoxBase, StateToolTip, LineEdit, TextEdit, MessageBox
 )
+from ..utils.resource_loader import get_resource_path
+import datetime
 
 class EmployeeListView(QWidget):
-    """员工列表视图"""
+    """员工列表视图 - Fluent Design风格"""
     
     # 自定义信号，当选择员工时发出
     employeeSelected = pyqtSignal(int)
@@ -19,6 +25,7 @@ class EmployeeListView(QWidget):
         super().__init__(parent)
         self.db = db
         self.parent = parent
+        self.selected_employee_id = None
         
         # 初始化UI
         self.initUI()
@@ -31,102 +38,140 @@ class EmployeeListView(QWidget):
         # 主布局
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # 标题
+        self.title_label = SubtitleLabel("员工管理", self)
+        self.title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
+        main_layout.addWidget(self.title_label)
         
         # 顶部工具栏
         top_bar = QHBoxLayout()
+        top_bar.setSpacing(10)
         
         # 搜索框
         self.search_edit = SearchLineEdit(self)
         self.search_edit.setPlaceholderText("搜索员工（姓名、工号、GID或部门）")
+        self.search_edit.setFixedWidth(320)
         self.search_edit.textChanged.connect(self.filterEmployees)
         top_bar.addWidget(self.search_edit)
         
+        top_bar.addStretch(1)
+        
         # 部门筛选下拉框
+        dept_container = QWidget()
+        dept_layout = QHBoxLayout(dept_container)
+        dept_layout.setContentsMargins(0, 0, 0, 0)
+        dept_layout.setSpacing(5)
+        
+        dept_label = QLabel("部门:", self)
+        dept_layout.addWidget(dept_label)
+        
         self.department_filter = ComboBox(self)
-        self.department_filter.setPlaceholderText("按部门筛选")
-        self.department_filter.setMinimumWidth(150)
+        self.department_filter.setPlaceholderText("全部")
+        self.department_filter.setMinimumWidth(120)
         self.department_filter.currentTextChanged.connect(self.filterEmployees)
-        top_bar.addWidget(self.department_filter)
+        dept_layout.addWidget(self.department_filter)
+        
+        top_bar.addWidget(dept_container)
         
         # 职级筛选下拉框
+        grade_container = QWidget()
+        grade_layout = QHBoxLayout(grade_container)
+        grade_layout.setContentsMargins(0, 0, 0, 0)
+        grade_layout.setSpacing(5)
+        
+        grade_label = QLabel("职级:", self)
+        grade_layout.addWidget(grade_label)
+        
         self.grade_filter = ComboBox(self)
-        self.grade_filter.setPlaceholderText("按职级筛选")
-        self.grade_filter.setMinimumWidth(150)
+        self.grade_filter.setPlaceholderText("全部")
+        self.grade_filter.setMinimumWidth(100)
         self.grade_filter.addItems(["全部", "G1", "G2", "G3", "G4A", "G4B", "Technian"])
         self.grade_filter.currentTextChanged.connect(self.filterEmployees)
-        top_bar.addWidget(self.grade_filter)
+        grade_layout.addWidget(self.grade_filter)
+        
+        top_bar.addWidget(grade_container)
         
         # 操作按钮
-        self.add_btn = PushButton('添加员工', self)
-        self.add_btn.clicked.connect(self.addEmployee)
-        top_bar.addWidget(self.add_btn)
-        
-        self.refresh_btn = PushButton('刷新', self)
+        self.refresh_btn = TransparentToolButton(FIF.SYNC, self)
+        self.refresh_btn.setToolTip("刷新")
         self.refresh_btn.clicked.connect(self.refreshEmployeeList)
         top_bar.addWidget(self.refresh_btn)
         
+        self.add_btn = PushButton('添加员工', self)
+        self.add_btn.setIcon(FIF.ADD)
+        self.add_btn.clicked.connect(self.addEmployee)
+        top_bar.addWidget(self.add_btn)
+        
         main_layout.addLayout(top_bar)
         
-        # 表格视图
+        # 表格容器卡片
         self.table_card = CardWidget(self)
-        table_layout = QVBoxLayout(self.table_card)
+        card_layout = QVBoxLayout(self.table_card)
+        card_layout.setContentsMargins(15, 15, 15, 15)
         
-        self.table_view = QTableView(self)
-        self.table_view.setSelectionBehavior(QTableView.SelectRows)
-        self.table_view.setSelectionMode(QTableView.SingleSelection)
-        self.table_view.setEditTriggers(QTableView.NoEditTriggers)
-        self.table_view.verticalHeader().setVisible(False)
-        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table_view.horizontalHeader().setHighlightSections(False)
+        # 使用 TableWidget 替代 QTableView
+        self.table_view = TableWidget(self.table_card)
+        self.table_view.setBorderVisible(True)
+        self.table_view.setBorderRadius(8)
+        self.table_view.setWordWrap(False)
         self.table_view.setAlternatingRowColors(True)
+        self.table_view.setColumnCount(8)
+        self.table_view.verticalHeader().hide()
+        self.table_view.setHorizontalHeaderLabels(['ID', '工号', 'GID', '姓名', '部门', '当前职级', '状态', '备注'])
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_view.setSortingEnabled(True)
-        self.table_view.clicked.connect(self.onTableClicked)
-        self.table_view.doubleClicked.connect(self.onTableDoubleClicked)
         
-        # 设置模型
-        self.model = QStandardItemModel(0, 8, self)
-        self.model.setHorizontalHeaderLabels(['ID', '工号', 'GID', '姓名', '部门', '当前职级', '状态', '备注'])
+        # 连接表格项点击信号
+        self.table_view.cellClicked.connect(self.onTableClicked)
+        self.table_view.cellDoubleClicked.connect(self.onTableDoubleClicked)
         
-        # 使用排序代理模型
-        self.proxy_model = QSortFilterProxyModel(self)
-        self.proxy_model.setSourceModel(self.model)
-        self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.proxy_model.setFilterKeyColumn(-1)  # 在所有列上进行过滤
+        card_layout.addWidget(self.table_view)
         
-        self.table_view.setModel(self.proxy_model)
-        
-        table_layout.addWidget(self.table_view)
         main_layout.addWidget(self.table_card)
         
         # 底部工具栏
         bottom_bar = QHBoxLayout()
         
-        self.edit_btn = PushButton('编辑', self)
+        # 操作按钮组
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(10)
+        
+        self.edit_btn = PushButton('编辑', button_container)
+        self.edit_btn.setIcon(FIF.EDIT)
         self.edit_btn.clicked.connect(self.editEmployee)
         self.edit_btn.setEnabled(False)
-        bottom_bar.addWidget(self.edit_btn)
+        button_layout.addWidget(self.edit_btn)
         
-        self.delete_btn = PushButton('删除', self)
+        self.delete_btn = PushButton('删除', button_container)
+        self.delete_btn.setIcon(FIF.DELETE)
         self.delete_btn.clicked.connect(self.deleteEmployee)
         self.delete_btn.setEnabled(False)
-        bottom_bar.addWidget(self.delete_btn)
+        button_layout.addWidget(self.delete_btn)
         
-        bottom_bar.addStretch()
+        bottom_bar.addWidget(button_container)
         
-        self.status_label = QWidget()
-        status_layout = QHBoxLayout(self.status_label)
+        bottom_bar.addStretch(1)
+        
+        # 状态信息
+        self.status_container = QWidget()
+        status_layout = QHBoxLayout(self.status_container)
         status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.addStretch()
+        status_layout.setSpacing(5)
         
-        # 创建QLabel并设置QPixmap作为其内容
-        icon_label = QLabel()
-        icon_label.setPixmap(self.style().standardIcon(self.style().SP_MessageBoxInformation).pixmap(16, 16))
-        status_layout.addWidget(icon_label)
+        # 创建状态图标和文本
+        info_icon = TransparentToolButton(FIF.INFO, self.status_container)
+        info_icon.setFixedSize(20, 20)
+        info_icon.setIconSize(QSize(16, 16))
+        status_layout.addWidget(info_icon)
         
-        self.count_label = QLabel('总计: 0 名员工')
+        self.count_label = QLabel('总计: 0 名员工', self.status_container)
         status_layout.addWidget(self.count_label)
         
-        bottom_bar.addWidget(self.status_label)
+        bottom_bar.addWidget(self.status_container)
         
         main_layout.addLayout(bottom_bar)
         
@@ -135,18 +180,21 @@ class EmployeeListView(QWidget):
     
     def loadEmployeeData(self, apply_filter=True):
         """加载员工数据"""
-        # 保存当前列宽
-        column_widths = []
-        for i in range(self.model.columnCount()):
-            column_widths.append(self.table_view.columnWidth(i))
-        
         # 保存当前筛选条件
         current_dept = self.department_filter.currentText()
         current_grade = self.grade_filter.currentText()
         search_text = self.search_edit.text()
         
-        # 清除现有数据
-        self.model.removeRows(0, self.model.rowCount())
+        # 保存排序状态
+        sort_column = self.table_view.horizontalHeader().sortIndicatorSection()
+        sort_order = self.table_view.horizontalHeader().sortIndicatorOrder()
+        
+        # 临时禁用排序功能，避免在加载数据过程中触发排序
+        self.table_view.setSortingEnabled(False)
+        
+        # 清除表格数据
+        self.table_view.clearContents()
+        self.table_view.setRowCount(0)
         
         # 获取员工数据
         employees = self.db.get_all_employees()
@@ -167,10 +215,13 @@ class EmployeeListView(QWidget):
         if current_dept and current_dept in departments:
             self.department_filter.setCurrentText(current_dept)
         
+        # 设置表格行数
+        self.table_view.setRowCount(len(employees))
+        
         # 添加员工数据到表格
-        for emp in employees:
-            # 获取当前年份的职级
-            current_grade_emp = emp.get('grade_2024', '')
+        for row, emp in enumerate(employees):
+            # 获取最新年份的职级
+            latest_grade = self.getLatestGrade(emp)
             
             # 获取备注并处理长文本
             notes = str(emp.get('notes', ''))
@@ -178,210 +229,558 @@ class EmployeeListView(QWidget):
             if len(notes) > 30:  # 限制备注显示长度为30个字符
                 truncated_notes = notes[:27] + "..."
             
-            # 创建表格项
-            items = [
-                QStandardItem(str(emp.get('id', ''))),
-                QStandardItem(str(emp.get('employee_no', ''))),
-                QStandardItem(str(emp.get('gid', ''))),
-                QStandardItem(str(emp.get('name', ''))),
-                QStandardItem(str(emp.get('department', ''))),
-                QStandardItem(str(current_grade_emp)),
-                QStandardItem(str(emp.get('status', ''))),
-                QStandardItem(truncated_notes)
-            ]
+            # 创建ID列的表格项，设置为数值类型以便正确排序
+            id_item = QTableWidgetItem()
+            id_item.setData(Qt.DisplayRole, int(emp.get('id', 0)))  # 设置为数值
+            self.table_view.setItem(row, 0, id_item)
+            
+            # 添加其他表格项
+            self.table_view.setItem(row, 1, QTableWidgetItem(str(emp.get('employee_no', ''))))
+            self.table_view.setItem(row, 2, QTableWidgetItem(str(emp.get('gid', ''))))
+            self.table_view.setItem(row, 3, QTableWidgetItem(str(emp.get('name', ''))))
+            self.table_view.setItem(row, 4, QTableWidgetItem(str(emp.get('department', ''))))
+            self.table_view.setItem(row, 5, QTableWidgetItem(str(latest_grade)))
+            self.table_view.setItem(row, 6, QTableWidgetItem(str(emp.get('status', ''))))
+            self.table_view.setItem(row, 7, QTableWidgetItem(truncated_notes))
             
             # 如果备注被截断，添加工具提示显示完整内容
             if len(notes) > 30:
-                items[-1].setToolTip(notes)
-            
-            # 设置不可编辑
-            for item in items:
-                item.setEditable(False)
-            
-            # 添加到模型
-            self.model.appendRow(items)
+                self.table_view.item(row, 7).setToolTip(notes)
+                
+        # 设置表格列宽
+        self.table_view.setColumnWidth(0, 80)  # ID
+        self.table_view.setColumnWidth(1, 120)  # 工号
+        self.table_view.setColumnWidth(2, 120)  # GID
+        self.table_view.setColumnWidth(3, 150)  # 姓名
+        self.table_view.setColumnWidth(4, 150)  # 部门
+        self.table_view.setColumnWidth(5, 100)  # 职级
+        self.table_view.setColumnWidth(6, 100)  # 状态
         
-        # 更新员工数量
+        # 更新员工计数
         self.count_label.setText(f'总计: {len(employees)} 名员工')
         
-        # 如果之前存在列宽设置，则恢复
-        if column_widths and len(column_widths) == self.model.columnCount():
-            # 恢复之前保存的列宽
-            for i in range(self.model.columnCount()):
-                if column_widths[i] > 0:  # 只恢复大于0的列宽
-                    self.table_view.setColumnWidth(i, column_widths[i])
-        else:
-            # 首次加载或列数变化时，自动调整列宽
-            self.table_view.resizeColumnsToContents()
+        # 重新启用排序功能
+        self.table_view.setSortingEnabled(True)
         
-        # 隐藏ID列
-        self.table_view.hideColumn(0)
+        # 恢复之前的排序状态
+        self.table_view.horizontalHeader().setSortIndicator(sort_column, sort_order)
         
-        # 应用筛选条件
-        if apply_filter:
-            # 恢复职级筛选
-            if current_grade != "全部":
-                self.grade_filter.setCurrentText(current_grade)
-            
-            # 恢复搜索文本
-            if search_text:
-                self.search_edit.setText(search_text)
-            
-            # 手动重新应用筛选
+        # 应用过滤器
+        if apply_filter and (search_text or current_dept != "全部" or current_grade != "全部"):
             self.filterEmployees()
+    
+    def getLatestGrade(self, employee):
+        """获取员工最新的职级"""
+        employee_id = employee.get('id')
+        if not employee_id:
+            return ""
+            
+        # 从职级历史表中获取最新职级
+        try:
+            self.db.cursor.execute("""
+            SELECT year, grade FROM employee_grades 
+            WHERE employee_id = ? 
+            ORDER BY year DESC LIMIT 1
+            """, (employee_id,))
+            
+            result = self.db.cursor.fetchone()
+            if result:
+                year, grade = result
+                return f"{grade} ({year})"
+            
+            # 如果没有职级历史记录，从旧的字段中查找（兼容旧数据）
+            grades = {}
+            
+            # 查找所有带年份的职级字段
+            for key, value in employee.items():
+                if key.startswith('grade_') and value:
+                    try:
+                        # 提取年份
+                        year = int(key.split('_')[1])
+                        grades[year] = value
+                    except (ValueError, IndexError):
+                        continue
+            
+            # 如果没有找到任何职级，返回空字符串
+            if not grades:
+                return ""
+            
+            # 返回最大年份的职级
+            latest_year = max(grades.keys())
+            return f"{grades[latest_year]} ({latest_year})"
+        except Exception as e:
+            print(f"获取最新职级失败: {e}")
+            return ""
     
     def refreshEmployeeList(self):
         """刷新员工列表"""
-        self.loadEmployeeData(apply_filter=True)
+        try:
+            # 显示刷新状态提示
+            state_tooltip = StateToolTip("正在刷新", "正在加载员工数据...", self.parent)
+            state_tooltip.move(self.parent.width() // 2 - state_tooltip.width() // 2,
+                            self.parent.height() // 2 - state_tooltip.height() // 2)
+            state_tooltip.show()
+            
+            # 记录加载前的行数，用于检测刷新后是否有数据
+            before_rows = self.table_view.rowCount()
+            
+            # 加载数据
+            self.loadEmployeeData()
+            
+            # 检查加载后的行数，确保数据正常加载
+            after_rows = self.table_view.rowCount()
+            if after_rows == 0 and before_rows > 0:
+                print("警告：刷新后表格为空，可能存在数据加载问题")
+            
+            # 更新状态提示并自动关闭
+            state_tooltip.setContent("数据刷新完成")
+            state_tooltip.setState(True)
+            
+            # 显示成功信息
+            InfoBar.success(
+                title='刷新成功',
+                content=f'员工数据已更新，共 {after_rows} 名员工',
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"刷新员工列表失败: {e}\n{error_details}")
+            
+            # 如果有状态提示，关闭它
+            try:
+                if 'state_tooltip' in locals() and state_tooltip:
+                    state_tooltip.setContent("刷新失败")
+                    state_tooltip.setState(False)
+            except:
+                pass
+                
+            # 显示错误消息
+            InfoBar.error(
+                title='刷新失败',
+                content=f"刷新员工列表时发生错误: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
     
     def filterEmployees(self):
-        """根据搜索文本筛选员工"""
-        # 获取筛选条件
-        search_text = self.search_edit.text().strip()
-        department = self.department_filter.currentText()
-        grade = self.grade_filter.currentText()
-        
-        # 重置筛选，先显示所有行
-        self.proxy_model.setFilterFixedString("")
-        for row in range(self.model.rowCount()):
-            self.table_view.showRow(row)
-        
-        # 应用通用搜索
-        if search_text:
-            self.proxy_model.setFilterFixedString(search_text)
-        
-        # 应用部门筛选
-        if department and department != "全部":
-            # 在模型中筛选指定部门
-            for row in range(self.model.rowCount()):
-                dept_item = self.model.item(row, 4)  # 部门列
-                if dept_item and dept_item.text() != department:
-                    self.table_view.hideRow(row)
-                else:
-                    self.table_view.showRow(row)
-        
-        # 应用职级筛选
-        if grade and grade != "全部":
-            # 在模型中筛选指定职级
-            for row in range(self.model.rowCount()):
-                grade_item = self.model.item(row, 5)  # 职级列
-                if grade_item and grade_item.text() != grade:
-                    self.table_view.hideRow(row)
-                else:
-                    if department and department != "全部":
-                        # 如果已经应用了部门筛选，则保持其结果
-                        dept_item = self.model.item(row, 4)
-                        if dept_item and dept_item.text() == department:
-                            self.table_view.showRow(row)
-                    else:
-                        self.table_view.showRow(row)
-        
-        # 更新显示行数
-        visible_rows = 0
-        for row in range(self.proxy_model.rowCount()):
-            if not self.table_view.isRowHidden(row):
-                visible_rows += 1
-        
-        self.count_label.setText(f'显示: {visible_rows} / {self.model.rowCount()} 名员工')
+        """根据搜索条件过滤员工列表"""
+        try:
+            search_text = self.search_edit.text().lower()
+            department = self.department_filter.currentText()
+            grade = self.grade_filter.currentText()
+            
+            # 保存排序状态
+            sort_column = self.table_view.horizontalHeader().sortIndicatorSection()
+            sort_order = self.table_view.horizontalHeader().sortIndicatorOrder()
+            
+            # 遍历所有行，根据条件显示或隐藏
+            for row in range(self.table_view.rowCount()):
+                # 安全获取单元格文本
+                def get_cell_text(row, col):
+                    item = self.table_view.item(row, col)
+                    if not item:
+                        return ""
+                    if col == 0:  # ID列特殊处理
+                        return str(item.data(Qt.DisplayRole)).lower()
+                    return item.text().lower()
+                
+                # 跳过空行或无效行
+                if self.table_view.item(row, 0) is None:
+                    continue
+                
+                employee_id = get_cell_text(row, 0)
+                employee_no = get_cell_text(row, 1)
+                gid = get_cell_text(row, 2)
+                name = get_cell_text(row, 3)
+                dept = get_cell_text(row, 4)
+                emp_grade = get_cell_text(row, 5)
+                status = get_cell_text(row, 6)
+                notes = get_cell_text(row, 7)
+                
+                # 检查是否符合搜索文本条件
+                text_match = search_text == "" or \
+                            search_text in employee_no or \
+                            search_text in gid or \
+                            search_text in name or \
+                            search_text in dept or \
+                            search_text in emp_grade or \
+                            search_text in status or \
+                            search_text in notes
+                
+                # 检查是否符合部门筛选条件
+                dept_match = department == "全部" or department.lower() == dept
+                
+                # 检查是否符合职级筛选条件
+                grade_match = grade == "全部" or (grade.lower() in emp_grade.lower())
+                
+                # 如果符合所有条件，则显示该行，否则隐藏
+                self.table_view.setRowHidden(row, not (text_match and dept_match and grade_match))
+            
+            # 确保排序状态保持不变
+            self.table_view.horizontalHeader().setSortIndicator(sort_column, sort_order)
+            
+            # 更新显示的员工计数
+            visible_count = sum(1 for row in range(self.table_view.rowCount()) if not self.table_view.isRowHidden(row))
+            self.count_label.setText(f'总计: {visible_count} 名员工')
+        except Exception as e:
+            print(f"筛选员工列表失败: {e}")
+            InfoBar.error(
+                title='筛选失败',
+                content=f"筛选员工列表时发生错误: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
     
-    def onTableClicked(self, index):
-        """表格项被点击时触发"""
-        # 启用编辑和删除按钮
-        self.edit_btn.setEnabled(True)
-        self.delete_btn.setEnabled(True)
+    def onTableClicked(self, row, column):
+        """表格项被单击时的处理函数"""
+        try:
+            # 检查该行是否有效
+            if row < 0 or row >= self.table_view.rowCount():
+                return
+                
+            # 安全获取数据
+            id_item = self.table_view.item(row, 0)
+            if id_item is None:
+                return
+                
+            # 获取所选员工ID - 使用data方法获取数值
+            employee_id = id_item.data(Qt.DisplayRole)
+            if not employee_id:
+                return
+                
+            self.selected_employee_id = int(employee_id)
+            
+            # 启用编辑和删除按钮
+            self.edit_btn.setEnabled(True)
+            self.delete_btn.setEnabled(True)
+        except Exception as e:
+            print(f"选择员工失败: {e}")
+            self.selected_employee_id = None
+            self.edit_btn.setEnabled(False)
+            self.delete_btn.setEnabled(False)
     
-    def onTableDoubleClicked(self, index):
-        """表格项被双击时触发"""
-        # 获取所选员工的ID
-        row = index.row()
-        id_index = self.proxy_model.index(row, 0)  # ID所在列
-        employee_id = int(self.proxy_model.data(id_index))
-        
-        # 发出员工被选中的信号
-        self.employeeSelected.emit(employee_id)
+    def onTableDoubleClicked(self, row, column):
+        """表格项被双击时的处理函数"""
+        try:
+            # 检查该行是否有效
+            if row < 0 or row >= self.table_view.rowCount():
+                return
+                
+            # 安全获取数据
+            id_item = self.table_view.item(row, 0)
+            if id_item is None:
+                return
+                
+            # 获取所选员工ID - 使用data方法获取数值
+            employee_id = id_item.data(Qt.DisplayRole)
+            if not employee_id:
+                return
+                
+            # 发送信号，显示员工详情
+            self.employeeSelected.emit(int(employee_id))
+        except Exception as e:
+            print(f"打开员工详情失败: {e}")
+            InfoBar.error(
+                title='操作失败',
+                content="无法打开员工详情",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
     
     def addEmployee(self):
-        """添加新员工"""
-        # 这里可以弹出添加员工的对话框
-        # 暂时使用InfoBar提示
-        InfoBar.info(
-            title='添加员工',
-            content='此功能尚未实现，将通过对话框添加员工',
-            orient=Qt.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP,
-            duration=3000,
-            parent=self
-        )
-        
-        # 后续可以实现添加员工的对话框
-        # 成功添加后刷新列表
+        """添加员工功能"""
+        try:
+            # 创建自定义对话框
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout
+            
+            class EmployeeDialog(QDialog):
+                def __init__(self, parent=None):
+                    super().__init__(parent)
+                    self.setWindowTitle("添加员工")
+                    self.resize(500, 550)
+                    
+                    # 创建表单布局
+                    self.main_layout = QVBoxLayout(self)
+                    self.form_layout = QFormLayout()
+                    
+                    # 创建输入字段
+                    self.emp_no_edit = LineEdit(self)
+                    self.emp_no_edit.setPlaceholderText("请输入工号")
+                    
+                    self.gid_edit = LineEdit(self)
+                    self.gid_edit.setPlaceholderText("请输入GID")
+                    
+                    self.name_edit = LineEdit(self)
+                    self.name_edit.setPlaceholderText("请输入姓名")
+                    
+                    # 部门下拉框
+                    self.department_edit = QComboBox(self)
+                    self.department_edit.setEditable(True)
+                    self.department_edit.setPlaceholderText("请选择或输入部门")
+                    
+                    # 初始职级下拉框
+                    grade_container = QWidget()
+                    grade_layout = QHBoxLayout(grade_container)
+                    grade_layout.setContentsMargins(0, 0, 0, 0)
+                    grade_layout.setSpacing(5)
+                    
+                    self.grade_edit = ComboBox(grade_container)
+                    self.grade_edit.addItems(["G1", "G2", "G3", "G4A", "G4B", "Technian"])
+                    self.grade_edit.setCurrentText("G1")
+                    grade_layout.addWidget(self.grade_edit)
+                    
+                    # 年份选择器
+                    current_year = datetime.datetime.now().year
+                    
+                    from PyQt5.QtWidgets import QSpinBox
+                    self.year_spin = QSpinBox(grade_container)
+                    self.year_spin.setRange(2000, current_year + 10)
+                    self.year_spin.setValue(current_year)
+                    grade_layout.addWidget(self.year_spin)
+                    
+                    # 状态选择框及自定义状态输入框
+                    self.status_container = QWidget(self)
+                    self.status_layout = QHBoxLayout(self.status_container)
+                    self.status_layout.setContentsMargins(0, 0, 0, 0)
+                    self.status_layout.setSpacing(10)
+                    
+                    self.status_edit = ComboBox(self.status_container)
+                    self.status_edit.addItems(["正常工作", "长期歇假", "自定义..."])
+                    self.status_edit.setCurrentText("正常工作")
+                    self.status_layout.addWidget(self.status_edit)
+                    
+                    self.custom_status_edit = LineEdit(self.status_container)
+                    self.custom_status_edit.setPlaceholderText("请输入自定义状态")
+                    self.custom_status_edit.setVisible(False)  # 默认隐藏
+                    self.status_layout.addWidget(self.custom_status_edit)
+                    
+                    # 当选择"自定义..."时显示自定义状态输入框
+                    self.status_edit.currentTextChanged.connect(self.on_status_changed)
+                    
+                    # 备注输入框
+                    self.notes_edit = TextEdit(self)
+                    self.notes_edit.setPlaceholderText("备注信息")
+                    self.notes_edit.setMaximumHeight(100)
+                    
+                    # 添加到表单布局
+                    self.form_layout.addRow("工号:", self.emp_no_edit)
+                    self.form_layout.addRow("GID:", self.gid_edit)
+                    self.form_layout.addRow("姓名:", self.name_edit)
+                    self.form_layout.addRow("部门:", self.department_edit)
+                    self.form_layout.addRow("当前职级:", grade_container)
+                    self.form_layout.addRow("状态:", self.status_container)
+                    self.form_layout.addRow("备注:", self.notes_edit)
+                    
+                    self.main_layout.addLayout(self.form_layout)
+                    
+                    # 创建按钮
+                    self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+                    self.button_box.accepted.connect(self.accept)
+                    self.button_box.rejected.connect(self.reject)
+                    self.main_layout.addWidget(self.button_box)
+                
+                def on_status_changed(self, text):
+                    """状态选择改变时的处理函数"""
+                    if text == "自定义...":
+                        self.custom_status_edit.setVisible(True)
+                        self.custom_status_edit.setFocus()
+                    else:
+                        self.custom_status_edit.setVisible(False)
+                
+                def get_employee_data(self):
+                    """获取员工数据"""
+                    # 获取状态
+                    if self.status_edit.currentText() == "自定义...":
+                        status_value = self.custom_status_edit.text()
+                    else:
+                        status_value = self.status_edit.currentText()
+                    
+                    return {
+                        'employee_no': self.emp_no_edit.text(),
+                        'gid': self.gid_edit.text(),
+                        'name': self.name_edit.text(),
+                        'department': self.department_edit.currentText(),
+                        'status': status_value,
+                        'notes': self.notes_edit.toPlainText(),
+                        # 添加职级信息
+                        'initial_grade': {
+                            'year': self.year_spin.value(),
+                            'grade': self.grade_edit.currentText()
+                        }
+                    }
+            
+            # 创建并显示对话框
+            dialog = EmployeeDialog(self)
+            
+            # 获取现有部门列表
+            departments = set()
+            for row in range(self.table_view.rowCount()):
+                dept = self.table_view.item(row, 4)
+                if dept and dept.text():
+                    departments.add(dept.text())
+            
+            # 添加部门到下拉框
+            dialog.department_edit.addItems(sorted(list(departments)))
+            
+            # 显示对话框
+            if dialog.exec_():
+                # 获取员工数据
+                employee_data = dialog.get_employee_data()
+                
+                # 添加员工到数据库
+                success = self.db.add_employee(employee_data, "管理员")
+                
+                if success:
+                    # 添加初始职级记录
+                    initial_grade = employee_data.get('initial_grade')
+                    if initial_grade:
+                        # 获取新添加的员工ID
+                        self.db.cursor.execute("SELECT last_insert_rowid()")
+                        employee_id = self.db.cursor.fetchone()[0]
+                        
+                        # 添加职级记录
+                        self.db.add_employee_grade(
+                            employee_id=employee_id,
+                            year=initial_grade['year'],
+                            grade=initial_grade['grade'],
+                            comment="初始职级",
+                            user="管理员"
+                        )
+                    
+                    # 刷新列表
+                    self.refreshEmployeeList()
+                    
+                    # 显示成功消息
+                    InfoBar.success(
+                        title='添加成功',
+                        content=f"已成功添加员工: {employee_data['name']}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                else:
+                    InfoBar.error(
+                        title='添加失败',
+                        content="添加员工时发生错误",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=5000,
+                        parent=self
+                    )
+        except Exception as e:
+            InfoBar.error(
+                title='添加失败',
+                content=f"错误: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
     
     def editEmployee(self):
-        """编辑员工信息"""
-        # 获取所选员工的ID
-        indexes = self.table_view.selectedIndexes()
-        if not indexes:
+        """编辑员工功能"""
+        if self.selected_employee_id is None:
+            InfoBar.warning(
+                title='未选择员工',
+                content='请先选择要编辑的员工',
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
         
-        row = indexes[0].row()
-        id_index = self.proxy_model.index(row, 0)  # ID所在列
-        employee_id = int(self.proxy_model.data(id_index))
-        
-        # 这里应该打开编辑员工的界面
-        self.employeeSelected.emit(employee_id)
+        # 发送信号，显示员工详情
+        self.employeeSelected.emit(self.selected_employee_id)
     
     def deleteEmployee(self):
-        """删除员工"""
-        # 获取所选员工的ID和姓名
-        indexes = self.table_view.selectedIndexes()
-        if not indexes:
+        """删除员工功能"""
+        if self.selected_employee_id is None:
+            InfoBar.warning(
+                title='未选择员工',
+                content='请先选择要删除的员工',
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
         
-        row = indexes[0].row()
-        id_index = self.proxy_model.index(row, 0)  # ID所在列
-        name_index = self.proxy_model.index(row, 3)  # 姓名所在列
-        
-        employee_id = int(self.proxy_model.data(id_index))
-        employee_name = self.proxy_model.data(name_index)
-        
-        # 确认删除
-        reply = QMessageBox.question(
-            self, 
-            '确认删除', 
-            f'确定要删除员工 {employee_name} 吗？此操作不可撤销！',
-            QMessageBox.Yes | QMessageBox.No, 
-            QMessageBox.No
+        # 确认删除对话框
+        dialog = MessageBox(
+            '确认删除',
+            f'确定要删除ID为 {self.selected_employee_id} 的员工记录吗？此操作不可撤销。',
+            self
         )
         
-        if reply == QMessageBox.Yes:
-            # 执行删除
-            success = self.db.delete_employee(employee_id, "管理员")
-            
-            if success:
-                InfoBar.success(
-                    title='删除成功',
-                    content=f"已成功删除员工 {employee_name}",
-                    orient=Qt.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP,
-                    duration=3000,
-                    parent=self
-                )
+        # 设置按钮
+        dialog.yesButton.setText('是')
+        dialog.cancelButton.setText('否')
+        
+        # 显示对话框
+        if dialog.exec_():
+            try:
+                # 执行删除操作
+                success = self.db.delete_employee(self.selected_employee_id, "管理员")
                 
-                # 刷新列表
-                self.refreshEmployeeList()
-                
-                # 禁用编辑和删除按钮
-                self.edit_btn.setEnabled(False)
-                self.delete_btn.setEnabled(False)
-            else:
+                if success:
+                    # 刷新列表
+                    self.refreshEmployeeList()
+                    
+                    # 重置选中状态
+                    self.selected_employee_id = None
+                    self.edit_btn.setEnabled(False)
+                    self.delete_btn.setEnabled(False)
+                    
+                    # 显示成功消息
+                    InfoBar.success(
+                        title='删除成功',
+                        content='员工记录已成功删除',
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                else:
+                    # 显示错误消息
+                    InfoBar.error(
+                        title='删除失败',
+                        content='删除操作未能完成',
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=5000,
+                        parent=self
+                    )
+            except Exception as e:
+                # 显示错误消息
                 InfoBar.error(
                     title='删除失败',
-                    content="删除员工时发生错误",
+                    content=f'错误: {str(e)}',
                     orient=Qt.Horizontal,
                     isClosable=True,
                     position=InfoBarPosition.TOP,
-                    duration=3000,
+                    duration=5000,
                     parent=self
                 ) 
