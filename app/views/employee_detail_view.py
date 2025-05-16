@@ -88,9 +88,9 @@ class EmployeeDetailView(QDialog):
         self.name_edit.setPlaceholderText("员工姓名")
         right_form.addRow("姓名:", self.name_edit)
         
-        # 部门
-        self.department_edit = LineEdit(self)
-        self.department_edit.setPlaceholderText("员工所在部门")
+        # 部门 - 使用EditableComboBox代替LineEdit
+        self.department_edit = EditableComboBox(self)
+        self.department_edit.setPlaceholderText("请选择或输入部门")
         right_form.addRow("部门:", self.department_edit)
         
         top_row_layout.addLayout(right_form)
@@ -231,7 +231,28 @@ class EmployeeDetailView(QDialog):
             self.status_combo.setCurrentText("自定义...")
             self.custom_status_edit.setText(status)
         
-        self.department_edit.setText(str(self.employee_data.get('department', '')))
+        # 获取所有部门列表
+        departments = set()
+        employees = self.db.get_all_employees()
+        for emp in employees:
+            if emp.get('department'):
+                departments.add(emp.get('department'))
+                
+        # 添加部门到下拉框
+        self.department_edit.clear()
+        for dept in sorted(departments):
+            self.department_edit.addItem(dept)
+            
+        # 设置当前部门
+        current_dept = str(self.employee_data.get('department', ''))
+        if current_dept:
+            # 如果当前部门在列表中，设置为当前选中项
+            if current_dept in departments:
+                self.department_edit.setCurrentText(current_dept)
+            else:
+                # 如果不在列表中，添加并设置为当前选中项
+                self.department_edit.addItem(current_dept)
+                self.department_edit.setCurrentText(current_dept)
         
         # 加载职级历史
         self.loadGradeHistory()
@@ -479,7 +500,7 @@ class EmployeeDetailView(QDialog):
             'gid': self.gid_edit.text(),
             'name': self.name_edit.text(),
             'status': status_value,
-            'department': self.department_edit.text(),
+            'department': self.department_edit.currentText(),
             'notes': self.notes_edit.toPlainText()
         }
         
