@@ -205,13 +205,14 @@ class EmployeeDetailView(QDialog):
         
         self.setLayout(main_layout)
     
-    def loadEmployee(self, employee_id):
+    def loadEmployee(self, employee_no):
         """加载员工信息"""
-        # 保存当前ID
-        self.employee_id = employee_id
-        self.employee_data = self.db.get_employee_by_id(employee_id)
+        # 保存当前工号
+        self.employee_id = employee_no  # 保持变量名，但存储的是employee_no
+        self.employee_data = self.db.get_employee_by_no(employee_no)
         
         if not self.employee_data:
+            print(f"找不到工号为 {employee_no} 的员工")
             return
             
         # 更新标题
@@ -275,8 +276,8 @@ class EmployeeDetailView(QDialog):
         # 清空表格
         self.grade_table.setRowCount(0)
         
-        # 获取职级历史
-        self.grades = self.db.get_employee_grades(self.employee_id)
+        # 获取职级历史 - 使用工号获取
+        self.grades = self.db.get_employee_grades_by_no(self.employee_id)
         
         # 填充表格
         for row, grade in enumerate(self.grades):
@@ -366,8 +367,8 @@ class EmployeeDetailView(QDialog):
             comment = dialog.comment_edit.toPlainText()
             
             # 保存到数据库
-            success = self.db.add_employee_grade(
-                employee_id=self.employee_id,
+            success = self.db.add_employee_grade_by_no(
+                employee_no=self.employee_id,
                 year=year,
                 grade=grade,
                 comment=comment,
@@ -413,8 +414,8 @@ class EmployeeDetailView(QDialog):
             comment = dialog.comment_edit.toPlainText()
             
             # 更新数据库
-            success = self.db.add_employee_grade(
-                employee_id=self.employee_id,
+            success = self.db.add_employee_grade_by_no(
+                employee_no=self.employee_id,
                 year=year,
                 grade=grade_value,
                 comment=comment,
@@ -514,7 +515,7 @@ class EmployeeDetailView(QDialog):
             return
         
         # 执行更新
-        success = self.db.update_employee(self.employee_id, updated_data, "管理员")
+        success = self.db.update_employee_by_no(self.employee_id, updated_data, "管理员")
         
         if success:
             # 提示保存成功

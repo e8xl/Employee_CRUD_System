@@ -3,7 +3,8 @@ from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon, QFont, QColor
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, 
     QHeaderView, QMessageBox, QLabel, QFrame,
-    QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QTextEdit, QComboBox, QSpinBox
+    QTableWidgetItem, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QTextEdit, QComboBox, QSpinBox,
+    QAbstractItemView
 )
 from qfluentwidgets import (
     SearchLineEdit, PushButton, InfoBar, InfoBarPosition,
@@ -20,7 +21,7 @@ class EmployeeListView(QWidget):
     """员工列表视图 - Fluent Design风格"""
     
     # 自定义信号，当选择员工时发出
-    employeeSelected = pyqtSignal(int)
+    employeeSelected = pyqtSignal(object)
     
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -118,11 +119,12 @@ class EmployeeListView(QWidget):
         self.table_view.setBorderRadius(8)
         self.table_view.setWordWrap(False)
         self.table_view.setAlternatingRowColors(True)
-        self.table_view.setColumnCount(8)
+        self.table_view.setColumnCount(7)
         self.table_view.verticalHeader().hide()
-        self.table_view.setHorizontalHeaderLabels(['ID', '工号', 'GID', '姓名', '部门', '当前职级', '状态', '备注'])
+        self.table_view.setHorizontalHeaderLabels(['工号', 'GID', '姓名', '部门', '当前职级', '状态', '备注'])
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_view.setSortingEnabled(True)
+        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)  # 禁用直接编辑
         
         # 连接表格项点击信号
         self.table_view.cellClicked.connect(self.onTableClicked)
@@ -225,28 +227,31 @@ class EmployeeListView(QWidget):
             latest_grade = self.getLatestGrade(emp)
             
             # 获取备注并处理长文本
-            notes = str(emp.get('notes', ''))
+            notes = emp.get('notes', '')
+            if notes is None:  # 确保None值显示为空字符串
+                notes = ""
+            else:
+                notes = str(notes)
+            
             truncated_notes = notes
             if len(notes) > 30:  # 限制备注显示长度为30个字符
                 truncated_notes = notes[:27] + "..."
             
-            # 创建ID列的表格项，设置为数值类型以便正确排序
-            id_item = QTableWidgetItem()
-            id_item.setData(Qt.DisplayRole, int(emp.get('id', 0)))  # 设置为数值
-            self.table_view.setItem(row, 0, id_item)
+            # 添加表格项，不再包含ID列
+            self.table_view.setItem(row, 0, QTableWidgetItem(str(emp.get('employee_no', ''))))
+            self.table_view.setItem(row, 1, QTableWidgetItem(str(emp.get('gid', ''))))
+            self.table_view.setItem(row, 2, QTableWidgetItem(str(emp.get('name', ''))))
+            self.table_view.setItem(row, 3, QTableWidgetItem(str(emp.get('department', ''))))
+            self.table_view.setItem(row, 4, QTableWidgetItem(str(latest_grade)))
+            self.table_view.setItem(row, 5, QTableWidgetItem(str(emp.get('status', ''))))
+            self.table_view.setItem(row, 6, QTableWidgetItem(truncated_notes))
             
-            # 添加其他表格项
-            self.table_view.setItem(row, 1, QTableWidgetItem(str(emp.get('employee_no', ''))))
-            self.table_view.setItem(row, 2, QTableWidgetItem(str(emp.get('gid', ''))))
-            self.table_view.setItem(row, 3, QTableWidgetItem(str(emp.get('name', ''))))
-            self.table_view.setItem(row, 4, QTableWidgetItem(str(emp.get('department', ''))))
-            self.table_view.setItem(row, 5, QTableWidgetItem(str(latest_grade)))
-            self.table_view.setItem(row, 6, QTableWidgetItem(str(emp.get('status', ''))))
-            self.table_view.setItem(row, 7, QTableWidgetItem(truncated_notes))
+            # 在工号列中存储employee_no作为用户数据，用于标识
+            self.table_view.item(row, 0).setData(Qt.UserRole, emp.get('employee_no'))
             
             # 如果备注被截断，添加工具提示显示完整内容
             if len(notes) > 30:
-                self.table_view.item(row, 7).setToolTip(notes)
+                self.table_view.item(row, 6).setToolTip(notes)
                 
         # 设置表格列宽
         self.table_view.setColumnWidth(0, 80)  # ID
@@ -272,46 +277,26 @@ class EmployeeListView(QWidget):
     
     def getLatestGrade(self, employee):
         """获取员工最新的职级"""
-        employee_id = employee.get('id')
-        if not employee_id:
+        # 从旧的字段中查找职级（使用最新年份）
+        grades = {}
+        
+        # 查找所有带年份的职级字段
+        for key, value in employee.items():
+            if key.startswith('grade_') and value:
+                try:
+                    # 提取年份
+                    year = int(key.split('_')[1])
+                    grades[year] = value
+                except (ValueError, IndexError):
+                    continue
+        
+        # 如果没有找到任何职级，返回空字符串
+        if not grades:
             return ""
-            
-        # 从职级历史表中获取最新职级
-        try:
-            self.db.cursor.execute("""
-            SELECT year, grade FROM employee_grades 
-            WHERE employee_id = ? 
-            ORDER BY year DESC LIMIT 1
-            """, (employee_id,))
-            
-            result = self.db.cursor.fetchone()
-            if result:
-                year, grade = result
-                return f"{grade} ({year})"
-            
-            # 如果没有职级历史记录，从旧的字段中查找（兼容旧数据）
-            grades = {}
-            
-            # 查找所有带年份的职级字段
-            for key, value in employee.items():
-                if key.startswith('grade_') and value:
-                    try:
-                        # 提取年份
-                        year = int(key.split('_')[1])
-                        grades[year] = value
-                    except (ValueError, IndexError):
-                        continue
-            
-            # 如果没有找到任何职级，返回空字符串
-            if not grades:
-                return ""
-            
-            # 返回最大年份的职级
-            latest_year = max(grades.keys())
-            return f"{grades[latest_year]} ({latest_year})"
-        except Exception as e:
-            print(f"获取最新职级失败: {e}")
-            return ""
+        
+        # 返回最大年份的职级
+        latest_year = max(grades.keys())
+        return f"{grades[latest_year]} ({latest_year})"
     
     def refreshEmployeeList(self):
         """刷新员工列表"""
@@ -397,14 +382,13 @@ class EmployeeListView(QWidget):
                 if self.table_view.item(row, 0) is None:
                     continue
                 
-                employee_id = get_cell_text(row, 0)
-                employee_no = get_cell_text(row, 1)
-                gid = get_cell_text(row, 2)
-                name = get_cell_text(row, 3)
-                dept = get_cell_text(row, 4)
-                emp_grade = get_cell_text(row, 5)
-                status = get_cell_text(row, 6)
-                notes = get_cell_text(row, 7)
+                employee_no = get_cell_text(row, 0)
+                gid = get_cell_text(row, 1)
+                name = get_cell_text(row, 2)
+                dept = get_cell_text(row, 3)
+                emp_grade = get_cell_text(row, 4)
+                status = get_cell_text(row, 5)
+                notes = get_cell_text(row, 6)
                 
                 # 检查是否符合搜索文本条件
                 text_match = search_text == "" or \
@@ -451,16 +435,16 @@ class EmployeeListView(QWidget):
                 return
                 
             # 安全获取数据
-            id_item = self.table_view.item(row, 0)
-            if id_item is None:
+            employee_item = self.table_view.item(row, 0)  # 工号列
+            if employee_item is None:
                 return
                 
-            # 获取所选员工ID - 使用data方法获取数值
-            employee_id = id_item.data(Qt.DisplayRole)
-            if not employee_id:
+            # 获取员工编号
+            employee_no = employee_item.data(Qt.UserRole) or employee_item.text()
+            if not employee_no:
                 return
                 
-            self.selected_employee_id = int(employee_id)
+            self.selected_employee_id = employee_no
             
             # 启用编辑和删除按钮
             self.edit_btn.setEnabled(True)
@@ -479,17 +463,17 @@ class EmployeeListView(QWidget):
                 return
                 
             # 安全获取数据
-            id_item = self.table_view.item(row, 0)
-            if id_item is None:
+            employee_item = self.table_view.item(row, 0)  # 工号列
+            if employee_item is None:
                 return
                 
-            # 获取所选员工ID - 使用data方法获取数值
-            employee_id = id_item.data(Qt.DisplayRole)
-            if not employee_id:
+            # 获取员工编号
+            employee_no = employee_item.data(Qt.UserRole) or employee_item.text()
+            if not employee_no:
                 return
                 
             # 发送信号，显示员工详情
-            self.employeeSelected.emit(int(employee_id))
+            self.employeeSelected.emit(employee_no)
         except Exception as e:
             print(f"打开员工详情失败: {e}")
             InfoBar.error(
@@ -628,7 +612,7 @@ class EmployeeListView(QWidget):
             # 获取现有部门列表
             departments = set()
             for row in range(self.table_view.rowCount()):
-                dept = self.table_view.item(row, 4)
+                dept = self.table_view.item(row, 3)
                 if dept and dept.text():
                     departments.add(dept.text())
             
@@ -728,7 +712,7 @@ class EmployeeListView(QWidget):
         # 确认删除对话框
         dialog = MessageBox(
             '确认删除',
-            f'确定要删除ID为 {self.selected_employee_id} 的员工记录吗？此操作不可撤销。',
+            f'确定要删除工号为 {self.selected_employee_id} 的员工记录吗？此操作不可撤销。',
             self
         )
         
@@ -740,7 +724,7 @@ class EmployeeListView(QWidget):
         if dialog.exec_():
             try:
                 # 执行删除操作
-                success = self.db.delete_employee(self.selected_employee_id, "管理员")
+                success = self.db.delete_employee_by_no(self.selected_employee_id, "管理员")
                 
                 if success:
                     # 刷新列表

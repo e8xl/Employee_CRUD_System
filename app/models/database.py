@@ -29,14 +29,13 @@ class EmployeeDatabase:
             self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS employee_grades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                employee_id INTEGER NOT NULL,
+                employee_no TEXT NOT NULL,
                 year INTEGER NOT NULL,
                 grade TEXT NOT NULL,
                 comment TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-                UNIQUE(employee_id, year)
+                UNIQUE(employee_no, year)
             )
             ''')
             self.conn.commit()
@@ -75,6 +74,19 @@ class EmployeeDatabase:
         """通过ID获取员工信息"""
         try:
             self.cursor.execute("SELECT * FROM employees WHERE id = ?", (employee_id,))
+            columns = [desc[0] for desc in self.cursor.description]
+            row = self.cursor.fetchone()
+            if row:
+                return dict(zip(columns, row))
+            return None
+        except sqlite3.Error as e:
+            print(f"获取员工信息失败: {e}")
+            return None
+    
+    def get_employee_by_no(self, employee_no):
+        """通过工号获取员工信息"""
+        try:
+            self.cursor.execute("SELECT * FROM employees WHERE employee_no = ?", (employee_no,))
             columns = [desc[0] for desc in self.cursor.description]
             row = self.cursor.fetchone()
             if row:
@@ -544,4 +556,150 @@ class EmployeeDatabase:
             return migrated_count
         except Exception as e:
             print(f"迁移职级数据失败: {e}")
-            return 0 
+            return 0
+    
+    def update_employee_by_no(self, employee_no, updated_data, user="系统"):
+        """通过员工工号更新员工信息"""
+        try:
+            # 获取更新前的员工信息用于日志记录
+            self.cursor.execute("SELECT * FROM employees WHERE employee_no = ?", (employee_no,))
+            old_data = dict(zip([desc[0] for desc in self.cursor.description], self.cursor.fetchone()))
+            if not old_data:
+                return False
+            
+            # 构建SET部分的SQL语句
+            set_clauses = []
+            values = []
+            
+            for key, value in updated_data.items():
+                if key != 'employee_no':  # 不更新工号字段
+                    set_clauses.append(f"{key} = ?")
+                    values.append(value)
+            
+            if not set_clauses:
+                return False
+            
+            # 添加WHERE条件的值
+            values.append(employee_no)
+            
+            query = f"UPDATE employees SET {', '.join(set_clauses)} WHERE employee_no = ?"
+            self.cursor.execute(query, values)
+            self.conn.commit()
+            
+            # 构建详细的日志信息，记录修改的字段和修改前后的值
+            changes = []
+            for key, new_value in updated_data.items():
+                if key in old_data and old_data[key] != new_value:
+                    old_value = old_data[key]
+                    changes.append(f"{key}: '{old_value}' → '{new_value}'")
+            
+            change_details = ", ".join(changes)
+            log_details = f"更新员工: {old_data['name']} (工号: {employee_no}), 修改内容: {change_details}"
+            
+            # 记录操作日志
+            self.log_operation(user, '更新员工信息', log_details)
+            return True
+        except sqlite3.Error as e:
+            print(f"更新员工信息失败: {e}")
+            return False
+    
+    def delete_employee_by_no(self, employee_no, user="系统"):
+        """通过员工工号删除员工"""
+        try:
+            # 先获取员工完整信息，用于日志记录
+            self.cursor.execute("SELECT * FROM employees WHERE employee_no = ?", (employee_no,))
+            result = self.cursor.fetchone()
+            
+            # 检查是否找到员工数据
+            if result is None:
+                print(f"未找到工号为{employee_no}的员工")
+                return False
+                
+            # 将查询结果转换为字典
+            columns = [desc[0] for desc in self.cursor.description]
+            employee_data = dict(zip(columns, result))
+            
+            # 构建详细的日志信息
+            details = []
+            field_names = {
+                'employee_no': '工号', 'gid': 'GID', 'name': '姓名', 
+                'status': '状态', 'department': '部门',
+                'grade_2020': '2020年职级', 'grade_2021': '2021年职级', 
+                'grade_2022': '2022年职级', 'grade_2023': '2023年职级', 
+                'grade_2024': '2024年职级', 'grade_2025': '2025年职级',
+                'notes': '备注'
+            }
+            
+            for key, label in field_names.items():
+                value = employee_data.get(key, '')
+                if value:  # 只记录非空值
+                    details.append(f"{label}: '{value}'")
+            
+            # 执行删除
+            self.cursor.execute("DELETE FROM employees WHERE employee_no = ?", (employee_no,))
+            self.conn.commit()
+            
+            # 记录操作日志
+            log_details = f"删除员工: {employee_data['name']} (工号: {employee_no}), 删除的信息: {', '.join(details)}"
+            self.log_operation(user, '删除员工', log_details)
+            return True
+        except sqlite3.Error as e:
+            print(f"删除员工失败: {e}")
+            return False
+        except Exception as e:
+            print(f"删除员工时发生未知错误: {e}")
+            return False
+    
+    def get_employee_grades_by_no(self, employee_no):
+        """通过员工工号获取所有职级历史记录"""
+        try:
+            self.cursor.execute("""
+            SELECT * FROM employee_grades 
+            WHERE employee_no = ? 
+            ORDER BY year DESC
+            """, (employee_no,))
+            
+            columns = [desc[0] for desc in self.cursor.description]
+            grades = []
+            for row in self.cursor.fetchall():
+                grade = dict(zip(columns, row))
+                grades.append(grade)
+            return grades
+        except sqlite3.Error as e:
+            print(f"通过工号获取员工职级历史失败: {e}")
+            return []
+    
+    def add_employee_grade_by_no(self, employee_no, year, grade, comment="", user="系统"):
+        """通过员工工号添加或更新职级记录"""
+        try:
+            # 尝试插入新记录，如果已存在则更新
+            self.cursor.execute("""
+            INSERT INTO employee_grades (employee_no, year, grade, comment)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(employee_no, year) 
+            DO UPDATE SET grade = ?, comment = ?, updated_at = CURRENT_TIMESTAMP
+            """, (employee_no, year, grade, comment, grade, comment))
+            
+            self.conn.commit()
+            
+            # 记录操作日志
+            employee_name = self._get_employee_name(employee_no)
+            log_details = f"更新员工职级: {employee_name} (工号: {employee_no}), {year}年职级: {grade}"
+            if comment:
+                log_details += f", 备注: {comment}"
+                
+            self.log_operation(user, '更新职级信息', log_details)
+            return True
+        except sqlite3.Error as e:
+            print(f"通过工号添加员工职级历史失败: {e}")
+            return False
+            
+    def _get_employee_name(self, employee_no):
+        """通过工号获取员工姓名"""
+        try:
+            self.cursor.execute("SELECT name FROM employees WHERE employee_no = ?", (employee_no,))
+            result = self.cursor.fetchone()
+            return result[0] if result else "未知员工"
+        except sqlite3.Error as e:
+            print(f"获取员工姓名失败: {e}")
+            return "未知员工" 

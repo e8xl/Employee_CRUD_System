@@ -22,17 +22,22 @@ from .employee_list_view import EmployeeListView
 from .employee_detail_view import EmployeeDetailView
 from .statistics_view import StatisticsView
 from .operation_logs_view import OperationLogsView
+from .assessment_items_view import AssessmentItemsView
+from .formula_management_view import FormulaManagementView
+from .employee_score_view import EmployeeScoreView
+from .grade_analysis_view import GradeAnalysisView
 from ..models.database import EmployeeDatabase
 from ..utils.resource_loader import get_resource_path
 
 class MainWindow(MSFluentWindow):
     """主窗口类 - 使用Fluent Design风格"""
     
-    def __init__(self):
+    def __init__(self, db, score_db):
         super().__init__()
         
         # 数据库实例
-        self.db = EmployeeDatabase()
+        self.db = db
+        self.score_db = score_db
         
         # 设置窗口属性
         self.setWindowTitle("员工管理系统")
@@ -45,9 +50,15 @@ class MainWindow(MSFluentWindow):
         self.statistics_view = StatisticsView(self.db, self)
         self.operation_logs_view = OperationLogsView(self.db, self)
         
-        # 初始化界面
-        self.initNavigation()
+        # 创建成绩管理系统视图
+        self.assessment_items_view = AssessmentItemsView(self.score_db, self)
+        self.formula_management_view = FormulaManagementView(self.score_db, self)
+        self.employee_score_view = EmployeeScoreView(self.score_db, self)
+        self.grade_analysis_view = GradeAnalysisView(self.score_db, self)
+        
+        # 初始化窗口 - 顺序很重要，先添加子视图，再设置导航
         self.initWindow()
+        self.initNavigation()
         
         # 连接信号和槽
         self.setupConnections()
@@ -77,13 +88,15 @@ class MainWindow(MSFluentWindow):
             position=NavigationItemPosition.TOP
         )
         
-        # 添加导航项
+        # 员工管理部分 - 不使用 addSeparator 方法
+        
+        # 添加导航项 - 员工管理
         self.navigationInterface.addItem(
             routeKey='employees',
             icon=FIF.PEOPLE,
             text='员工管理',
             position=NavigationItemPosition.TOP,
-            onClick=lambda: self.stackedWidget.setCurrentWidget(self.employee_list_view)
+            onClick=lambda: self.switchTo(self.employee_list_view, 'employees')
         )
         
         self.navigationInterface.addItem(
@@ -91,7 +104,7 @@ class MainWindow(MSFluentWindow):
             icon=FIF.PIE_SINGLE,
             text='统计分析',
             position=NavigationItemPosition.TOP,
-            onClick=lambda: self.stackedWidget.setCurrentWidget(self.statistics_view)
+            onClick=lambda: self.switchTo(self.statistics_view, 'statistics')
         )
         
         # 添加数据操作项
@@ -111,13 +124,55 @@ class MainWindow(MSFluentWindow):
             onClick=self.exportData
         )
         
+        # 成绩管理系统部分 - 使用一个分隔标签代替分隔符
+        self.navigationInterface.addItem(
+            routeKey='score_management',
+            icon=FIF.EDUCATION,
+            text='成绩管理系统',
+            position=NavigationItemPosition.TOP,
+            onClick=lambda: None  # 这个项目不需要点击操作
+        )
+        
+        # 添加导航项 - 成绩管理
+        self.navigationInterface.addItem(
+            routeKey='assessment_items',
+            icon=FIF.VIEW,
+            text='考核项目管理',
+            position=NavigationItemPosition.TOP,
+            onClick=lambda: self.switchTo(self.assessment_items_view, 'assessment_items')
+        )
+        
+        self.navigationInterface.addItem(
+            routeKey='formula_management',
+            icon=FIF.EDIT,
+            text='职级计算公式',
+            position=NavigationItemPosition.TOP,
+            onClick=lambda: self.switchTo(self.formula_management_view, 'formula_management')
+        )
+        
+        self.navigationInterface.addItem(
+            routeKey='employee_score',
+            icon=FIF.EDIT,
+            text='员工成绩录入',
+            position=NavigationItemPosition.TOP,
+            onClick=lambda: self.switchTo(self.employee_score_view, 'employee_score')
+        )
+        
+        self.navigationInterface.addItem(
+            routeKey='grade_analysis',
+            icon=FIF.CHAT,
+            text='职级预测分析',
+            position=NavigationItemPosition.TOP,
+            onClick=lambda: self.switchTo(self.grade_analysis_view, 'grade_analysis')
+        )
+        
         # 添加底部导航项
         self.navigationInterface.addItem(
             routeKey='logs',
             icon=FIF.HISTORY,
             text='操作日志',
             position=NavigationItemPosition.BOTTOM,
-            onClick=lambda: self.stackedWidget.setCurrentWidget(self.operation_logs_view)
+            onClick=lambda: self.switchTo(self.operation_logs_view, 'logs')
         )
         
         self.navigationInterface.addItem(
@@ -139,12 +194,24 @@ class MainWindow(MSFluentWindow):
         # 设置默认选中的导航项
         self.navigationInterface.setCurrentItem('employees')
     
+    def switchTo(self, widget, routeKey):
+        """切换到指定的视图"""
+        self.stackedWidget.setCurrentWidget(widget)
+        self.navigationInterface.setCurrentItem(routeKey)
+        print(f"已切换到: {routeKey}")
+    
     def initWindow(self):
         """初始化窗口布局"""
         # 添加视图到堆叠部件
         self.addSubInterface(self.employee_list_view, 'employees', '员工管理')
         self.addSubInterface(self.statistics_view, 'statistics', '统计分析')
         self.addSubInterface(self.operation_logs_view, 'logs', '操作日志')
+        
+        # 添加成绩管理系统视图
+        self.addSubInterface(self.assessment_items_view, 'assessment_items', '考核项目管理')
+        self.addSubInterface(self.formula_management_view, 'formula_management', '职级计算公式')
+        self.addSubInterface(self.employee_score_view, 'employee_score', '员工成绩录入')
+        self.addSubInterface(self.grade_analysis_view, 'grade_analysis', '职级预测分析')
         
         # 设置样式
         self.setStyleSheet("""
@@ -163,10 +230,10 @@ class MainWindow(MSFluentWindow):
         # 当选择员工时，显示员工详细信息
         self.employee_list_view.employeeSelected.connect(self.showEmployeeDetail)
     
-    def showEmployeeDetail(self, employee_id):
+    def showEmployeeDetail(self, employee_no):
         """显示员工详细信息"""
         # 直接加载员工详情
-        self.employee_detail_view.loadEmployee(employee_id)
+        self.employee_detail_view.loadEmployee(employee_no)
         
         # 每次显示时确保窗口位于正确的位置
         if self.employee_detail_view.isVisible():
@@ -356,6 +423,7 @@ class MainWindow(MSFluentWindow):
                 
                 # 关闭数据库连接
                 self.db.close_connection()
+                self.score_db.close()
                 
                 # 备份当前数据库
                 db_path = self.db.get_db_path()
@@ -419,6 +487,7 @@ class MainWindow(MSFluentWindow):
         """窗口关闭事件"""
         # 关闭数据库连接
         self.db.close_connection()
+        self.score_db.close()
         
         # 接受关闭事件
         event.accept() 
