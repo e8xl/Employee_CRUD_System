@@ -496,21 +496,30 @@ class EmployeeDatabase:
         """删除指定的职级记录"""
         try:
             # 先获取职级记录信息用于日志
-            self.cursor.execute("SELECT employee_id, year, grade FROM employee_grades WHERE id = ?", (grade_id,))
+            self.cursor.execute("SELECT employee_no, year, grade FROM employee_grades WHERE id = ?", (grade_id,))
             result = self.cursor.fetchone()
             
             if not result:
                 return False
                 
-            employee_id, year, grade = result
+            employee_no, year, grade = result
             
             # 执行删除
             self.cursor.execute("DELETE FROM employee_grades WHERE id = ?", (grade_id,))
+            
+            # 同时清空employees表中对应年份的职级字段
+            grade_field = f"grade_{year}"
+            self.cursor.execute(f"""
+            UPDATE employees 
+            SET {grade_field} = '' 
+            WHERE employee_no = ?
+            """, (employee_no,))
+            
             self.conn.commit()
             
             # 记录操作日志
-            employee_name = self.get_employee_name(employee_id)
-            log_details = f"删除员工职级记录: {employee_name} (ID: {employee_id}), {year}年职级: {grade}"
+            employee_name = self._get_employee_name(employee_no)
+            log_details = f"删除员工职级记录: {employee_name} (工号: {employee_no}), {year}年职级: {grade}"
             self.log_operation(user, '删除职级记录', log_details)
             
             return True
@@ -679,6 +688,14 @@ class EmployeeDatabase:
             ON CONFLICT(employee_no, year) 
             DO UPDATE SET grade = ?, comment = ?, updated_at = CURRENT_TIMESTAMP
             """, (employee_no, year, grade, comment, grade, comment))
+            
+            # 同时更新employees表中对应年份的职级字段
+            grade_field = f"grade_{year}"
+            self.cursor.execute(f"""
+            UPDATE employees 
+            SET {grade_field} = ? 
+            WHERE employee_no = ?
+            """, (grade, employee_no))
             
             self.conn.commit()
             

@@ -826,4 +826,64 @@ class ScoreDatabase:
             return employees
         except sqlite3.Error as e:
             print(f"获取部门员工失败: {e}")
-            return [] 
+            return []
+            
+    def apply_evaluated_grades(self, year, target_year, user="系统"):
+        """将评定的职级应用到员工表和职级历史表中"""
+        try:
+            print(f"应用{year}年职级到{target_year}年")
+            
+            # 获取所有有评定职级的记录
+            self.cursor.execute("""
+            SELECT s.employee_no, s.evaluated_grade, e.name
+            FROM skill_scores s
+            JOIN employees e ON s.employee_no = e.employee_no
+            WHERE s.year = ? AND s.evaluated_grade IS NOT NULL AND s.evaluated_grade != ''
+            """, (year,))
+            
+            results = self.cursor.fetchall()
+            
+            if not results:
+                print(f"没有{year}年的职级评定结果")
+                return 0
+                
+            update_count = 0
+            
+            for employee_no, evaluated_grade, employee_name in results:
+                # 更新员工表中的职级字段
+                target_field = f"grade_{target_year}"
+                self.cursor.execute(f"""
+                UPDATE employees
+                SET {target_field} = ?
+                WHERE employee_no = ?
+                """, (evaluated_grade, employee_no))
+                
+                # 同时更新职级历史表 - 使用ON CONFLICT子句处理已存在的记录
+                self.cursor.execute("""
+                INSERT INTO employee_grades (employee_no, year, grade, comment)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(employee_no, year) 
+                DO UPDATE SET grade = ?, comment = ?, updated_at = CURRENT_TIMESTAMP
+                """, (employee_no, target_year, evaluated_grade, 
+                      f"从{year}年技能评分评定结果应用", evaluated_grade, 
+                      f"从{year}年技能评分评定结果应用"))
+                
+                if self.cursor.rowcount > 0:
+                    update_count += 1
+                    print(f"已更新员工: {employee_name} ({employee_no}) 的{target_year}年职级为: {evaluated_grade}")
+            
+            self.conn.commit()
+            
+            # 记录操作日志
+            self._log_operation(
+                user,
+                '应用评定职级',
+                f"将{year}年技能评分评定的职级应用到{target_year}年，更新了{update_count}名员工的职级"
+            )
+            
+            return update_count
+        except Exception as e:
+            print(f"应用评定职级失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0 
