@@ -124,15 +124,7 @@ class MainWindow(MSFluentWindow):
             onClick=self.exportData
         )
         
-        # 成绩管理系统部分 - 使用一个分隔标签代替分隔符
-        self.navigationInterface.addItem(
-            routeKey='score_management',
-            icon=FIF.EDUCATION,
-            text='成绩管理系统',
-            position=NavigationItemPosition.TOP,
-            onClick=lambda: None  # 这个项目不需要点击操作
-        )
-        
+        # 成绩管理系统部分 - 不再使用分隔标签
         # 添加导航项 - 成绩管理
         self.navigationInterface.addItem(
             routeKey='assessment_items',

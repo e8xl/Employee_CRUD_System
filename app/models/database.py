@@ -582,6 +582,9 @@ class EmployeeDatabase:
             
             for key, value in updated_data.items():
                 if key != 'employee_no':  # 不更新工号字段
+                    # 确保值不为None，如果是None则转换为空字符串
+                    if value is None:
+                        value = ""
                     set_clauses.append(f"{key} = ?")
                     values.append(value)
             

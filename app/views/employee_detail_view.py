@@ -496,13 +496,15 @@ class EmployeeDetailView(QDialog):
             status_value = self.status_combo.currentText()
         
         # 收集更新后的数据
+        notes_text = self.notes_edit.toPlainText() or ""  # 确保notes为空字符串而不是None
+        
         updated_data = {
             'employee_no': self.employee_no_edit.text(),
             'gid': self.gid_edit.text(),
             'name': self.name_edit.text(),
             'status': status_value,
             'department': self.department_edit.currentText(),
-            'notes': self.notes_edit.toPlainText()
+            'notes': notes_text
         }
         
         # 检查必填字段

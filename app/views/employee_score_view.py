@@ -1,6 +1,6 @@
 import os
 import datetime
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QTimer
 from PyQt5.QtGui import QIcon, QFont, QColor
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -23,16 +23,32 @@ class EmployeeScoreView(QWidget):
     def __init__(self, score_db, parent=None):
         super().__init__(parent)
         self.score_db = score_db
+        self.current_employee_no = None
+        self.assessment_items = []
         
         # 初始化界面
         self.initUI()
+        
+        # 延迟0.5秒加载数据，确保界面初始化完成
+        QTimer.singleShot(500, self.initData)
         
     def initUI(self):
         """初始化界面"""
         # 主布局
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 10, 20, 20)
+        main_layout.setSpacing(10)
+        
+        # 添加使用说明标签 - 缩小并改为更简洁的样式
+        guide_label = QLabel(
+            "使用说明: 先选择部门 → 选择员工 → 录入成绩 → 保存", 
+            self
+        )
+        guide_label.setStyleSheet(
+            "QLabel { background-color: #E3F2FD; padding: 5px; border-radius: 4px; font-size: 12px; }"
+        )
+        guide_label.setMaximumHeight(30)
+        main_layout.addWidget(guide_label)
         
         # 顶部控制区域
         top_layout = QHBoxLayout()
@@ -58,12 +74,18 @@ class EmployeeScoreView(QWidget):
         
         self.year_combo.setCurrentText(str(current_year))
         self.year_combo.setMinimumWidth(100)
+        self.year_combo.currentIndexChanged.connect(self.refresh_scores)
         top_layout.addWidget(QLabel("年份:"))
         top_layout.addWidget(self.year_combo)
         
         top_layout.addStretch(1)
         
         # 添加按钮区域
+        self.batch_button = PushButton("批量录入", self, FIF.EDIT)
+        self.batch_button.clicked.connect(self.batch_edit_scores)
+        self.batch_button.setToolTip("打开批量成绩录入界面")
+        top_layout.addWidget(self.batch_button)
+        
         self.import_button = PushButton("导入成绩", self, FIF.DOWNLOAD)
         self.import_button.clicked.connect(self.import_scores)
         top_layout.addWidget(self.import_button)
@@ -105,6 +127,11 @@ class EmployeeScoreView(QWidget):
         self.score_card = SimpleCardWidget(self)
         score_layout = QVBoxLayout(self.score_card)
         
+        # 员工信息标签
+        self.employee_info_label = QLabel("请选择员工", self.score_card)
+        self.employee_info_label.setStyleSheet("font-weight: bold; color: #1976D2;")
+        score_layout.addWidget(self.employee_info_label)
+        
         # 成绩表格
         self.score_table = TableWidget(self.score_card)
         self.score_table.setColumnCount(5)
@@ -126,38 +153,58 @@ class EmployeeScoreView(QWidget):
         # 设置分割器比例
         splitter.setSizes([int(self.width() * 0.3), int(self.width() * 0.7)])
         main_layout.addWidget(splitter)
-        
-        # 初始状态
-        self.current_employee_no = None
-        self.assessment_items = []
     
     def load_departments(self):
         """加载部门列表"""
+        self.department_combo.clear()
+        
+        # 获取所有部门
         departments = self.score_db.get_all_departments()
-        for dept in departments:
-            self.department_combo.addItem(dept, dept)
+        
+        # 如果有部门数据，添加到下拉框
+        if departments:
+            for dept in departments:
+                self.department_combo.addItem(dept, dept)  # 确保数据值与显示文本相同
+        else:
+            # 如果没有部门数据，显示提示
+            self.department_combo.addItem("无部门数据", "")
+            print("没有可用的部门数据")
     
     def load_employees(self):
         """加载部门员工"""
         self.employee_tree.clear()
         self.score_table.setRowCount(0)
         self.current_employee_no = None
+        self.employee_info_label.setText("请选择员工")
         
-        department = self.department_combo.currentData()
-        if not department:
+        # 获取当前选择的部门文本，而不是数据
+        department = self.department_combo.currentText()
+        if not department or department == "无部门数据":
+            print(f"未选择有效部门: '{department}'，无法加载员工")
             return
         
+        print(f"成绩录入界面：正在加载 {department} 部门员工...")
+        
+        # 获取部门员工
         employees = self.score_db.get_department_employees(department)
+        
+        print(f"成绩录入界面：获取到 {department} 部门员工 {len(employees)} 人")
         
         # 创建根节点
         root = QTreeWidgetItem(self.employee_tree, [f"{department} ({len(employees)}人)"])
         
         # 添加员工
         for employee in employees:
+            print(f"成绩录入界面：添加员工 {employee['name']} ({employee['employee_no']})")
             item = QTreeWidgetItem(root, [f"{employee['name']} ({employee['employee_no']})"])
             item.setData(0, Qt.UserRole, employee['employee_no'])
         
         self.employee_tree.expandAll()
+        
+        # 自动选择第一个员工
+        if root.childCount() > 0:
+            first_employee = root.child(0)
+            self.employee_tree.setCurrentItem(first_employee)
     
     def filter_employees(self):
         """筛选员工"""
@@ -219,8 +266,28 @@ class EmployeeScoreView(QWidget):
         department = self.department_combo.currentData()
         self.assessment_items = self.score_db.get_all_assessment_items(department)
         
+        if not self.assessment_items:
+            InfoBar.warning(
+                title='提示',
+                content=f"该部门尚未设置考核项目，请先在'考核项目管理'中设置",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
+            return
+        
         # 设置员工编号 - 传入的employee_id实际上已经是employee_no
         self.current_employee_no = employee_id
+        
+        # 获取员工信息
+        employee_info = self.score_db.get_employee_info(employee_id)
+        if employee_info:
+            current_grade = employee_info.get('grade_2024') or employee_info.get('grade_2023') or "未设置"
+            self.employee_info_label.setText(f"员工: {employee_info['name']} ({employee_id}) | 部门: {employee_info['department']} | 当前职级: {current_grade}")
+        else:
+            self.employee_info_label.setText(f"员工: (工号: {employee_id})")
         
         # 获取员工现有成绩
         employee_scores = self.score_db.get_employee_scores(employee_id, year)
@@ -250,16 +317,23 @@ class EmployeeScoreView(QWidget):
             max_score_item.setFlags(max_score_item.flags() & ~Qt.ItemIsEditable)  # 不可编辑
             self.score_table.setItem(row, 2, max_score_item)
             
-            # 得分
-            score_item = QTableWidgetItem()
+            # 得分 - 使用DoubleSpinBox代替QTableWidgetItem提高用户体验
+            score_value = 0.0
             if item['id'] in score_dict:
-                score_item.setText(str(score_dict[item['id']]['score']))
-            self.score_table.setItem(row, 3, score_item)
+                score_value = score_dict[item['id']]['score']
+            
+            score_spin = DoubleSpinBox()
+            score_spin.setRange(0, item['max_score'])  # 限制分数范围
+            score_spin.setDecimals(1)  # 设置小数位数
+            score_spin.setValue(score_value)
+            self.score_table.setCellWidget(row, 3, score_spin)
             
             # 备注
             comment_item = QTableWidgetItem()
             if item['id'] in score_dict:
-                comment_item.setText(score_dict[item['id']]['comment'] or "")
+                comment_text = score_dict[item['id']].get('comment')
+                if comment_text is not None:
+                    comment_item.setText(comment_text)
             self.score_table.setItem(row, 4, comment_item)
     
     def save_scores(self):
@@ -289,26 +363,9 @@ class EmployeeScoreView(QWidget):
         
         for row in range(self.score_table.rowCount()):
             assessment_item_id = self.score_table.item(row, 0).data(Qt.UserRole)
-            score_text = self.score_table.item(row, 3).text().strip()
+            score_spin = self.score_table.cellWidget(row, 3)
+            score_value = score_spin.value()
             comment = self.score_table.item(row, 4).text().strip()
-            
-            # 检查分数是否为空
-            if not score_text:
-                continue
-                
-            try:
-                score_value = float(score_text)
-            except ValueError:
-                InfoBar.error(
-                    title='格式错误',
-                    content=f"第 {row+1} 行的分数格式错误，应为数字",
-                    orient=Qt.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP,
-                    duration=3000,
-                    parent=self
-                )
-                continue
             
             # 准备成绩数据
             score_data = {
@@ -337,7 +394,6 @@ class EmployeeScoreView(QWidget):
                             count_updated += 1
                         else:
                             count_added += 1
-                        break
         
         # 显示保存结果
         InfoBar.success(
@@ -602,4 +658,462 @@ class EmployeeScoreView(QWidget):
         current_value = grades.get(current_grade, 0)
         predicted_value = grades.get(predicted_grade, 0)
         
-        return predicted_value > current_value 
+        return predicted_value > current_value
+    
+    def batch_edit_scores(self):
+        """批量编辑成绩"""
+        department = self.department_combo.currentData()
+        
+        if not department:
+            InfoBar.error(
+                title='错误',
+                content="请先选择部门",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+            
+        try:
+            year = int(self.year_combo.currentText())
+        except ValueError:
+            year = datetime.datetime.now().year
+            
+        # 创建批量编辑对话框
+        dialog = BatchScoreDialog(self.score_db, department, year, self)
+        dialog.setWindowTitle(f"{department}部门 {year}年批量成绩录入")
+        
+        # 显示对话框
+        if dialog.exec_():
+            # 如果当前有选中员工，刷新其显示
+            if self.current_employee_no:
+                self.load_employee_scores(self.current_employee_no)
+                
+            InfoBar.success(
+                title='更新完成',
+                content="批量成绩编辑已完成",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            
+    def refresh_scores(self):
+        """刷新当前员工成绩"""
+        if self.current_employee_no:
+            self.load_employee_scores(self.current_employee_no)
+    
+    def initData(self):
+        """初始化数据 - 自动加载部门和员工"""
+        # 1. 加载部门
+        self.load_departments()
+        
+        # 2. 尝试自动选择部门
+        if self.department_combo.count() > 0:
+            self.department_combo.setCurrentIndex(0)  # 选择第一个可用部门
+            print(f"已自动选择部门: {self.department_combo.currentText()}")
+        
+        # 3. 加载员工
+        self.load_employees()
+        
+        # 4. 如果员工树为空，向用户显示提示信息
+        if self.employee_tree.topLevelItemCount() == 0 or (self.employee_tree.topLevelItemCount() > 0 and self.employee_tree.topLevelItem(0).childCount() == 0):
+            InfoBar.warning(
+                title='提示',
+                content="未找到员工数据，请先在员工管理中添加员工数据，然后在考核项目管理中设置考核项目",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self
+            )
+            print("成绩录入界面：未找到员工数据")
+
+class BatchScoreDialog(QDialog):
+    """批量成绩录入对话框"""
+    
+    def __init__(self, score_db, department, year, parent=None):
+        super().__init__(parent)
+        self.score_db = score_db
+        self.department = department
+        self.year = year
+        
+        # 设置窗口
+        self.resize(900, 600)
+        self.setWindowTitle(f"批量成绩录入 - {department}")
+        
+        # 初始化UI
+        self.initUI()
+        
+        # 加载数据
+        self.load_data()
+        
+    def initUI(self):
+        """初始化界面"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 10, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # 顶部标题和搜索
+        top_layout = QHBoxLayout()
+        
+        info_label = QLabel(f"{self.department}部门 {self.year}年成绩批量录入", self)
+        info_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        top_layout.addWidget(info_label)
+        
+        top_layout.addStretch(1)
+        
+        # 添加检索
+        self.search_edit = SearchLineEdit(self)
+        self.search_edit.setPlaceholderText("搜索员工")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setMinimumWidth(200)
+        self.search_edit.textChanged.connect(self.filter_table)
+        top_layout.addWidget(self.search_edit)
+        
+        main_layout.addLayout(top_layout)
+        
+        # 表格区域
+        self.score_table = TableWidget(self)
+        self.score_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        
+        main_layout.addWidget(self.score_table)
+        
+        # 底部按钮
+        button_layout = QHBoxLayout()
+        
+        # 导入按钮
+        self.import_btn = PushButton("导入Excel", self, FIF.DOWNLOAD)
+        self.import_btn.clicked.connect(self.import_from_excel)
+        button_layout.addWidget(self.import_btn)
+        
+        # 导出按钮
+        self.export_btn = PushButton("导出Excel", self, FIF.SAVE)
+        self.export_btn.clicked.connect(self.export_to_excel)
+        button_layout.addWidget(self.export_btn)
+        
+        button_layout.addStretch(1)
+        
+        # 保存按钮
+        self.save_btn = PrimaryPushButton("保存所有成绩", self, FIF.SAVE)
+        self.save_btn.clicked.connect(self.save_all_scores)
+        button_layout.addWidget(self.save_btn)
+        
+        # 取消按钮
+        self.cancel_btn = PushButton("关闭", self, FIF.CLOSE)
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+        
+        main_layout.addLayout(button_layout)
+    
+    def load_data(self):
+        """加载表格数据"""
+        # 获取部门所有员工和考核项目
+        employees = self.score_db.get_department_employees(self.department)
+        assessment_items = self.score_db.get_all_assessment_items(self.department)
+        
+        if not employees:
+            InfoBar.warning(
+                title='提示',
+                content=f"未找到{self.department}部门的员工",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+            
+        if not assessment_items:
+            InfoBar.warning(
+                title='提示',
+                content=f"未找到{self.department}部门的考核项目",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+        
+        # 设置表格列
+        self.score_table.setColumnCount(len(assessment_items) + 3)  # 工号、姓名、职级、考核项目...
+        
+        # 设置表头
+        headers = ['工号', '姓名', '职级']
+        item_columns = []
+        for item in assessment_items:
+            headers.append(f"{item['assessment_name']} ({item['weight']})")
+            item_columns.append(item['id'])
+        
+        self.score_table.setHorizontalHeaderLabels(headers)
+        
+        # 保存考核项目ID用于后续保存数据
+        self.item_columns = item_columns
+        
+        # 填充员工数据
+        self.score_table.setRowCount(len(employees))
+        
+        for row, employee in enumerate(employees):
+            # 工号
+            employee_no_item = QTableWidgetItem(employee['employee_no'])
+            employee_no_item.setFlags(employee_no_item.flags() & ~Qt.ItemIsEditable)  # 不可编辑
+            self.score_table.setItem(row, 0, employee_no_item)
+            
+            # 姓名
+            name_item = QTableWidgetItem(employee['name'])
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)  # 不可编辑
+            self.score_table.setItem(row, 1, name_item)
+            
+            # 职级 - 使用最新职级
+            grade_text = employee.get('grade_2024') or employee.get('grade_2023') or "未设置"
+            grade_item = QTableWidgetItem(grade_text)
+            grade_item.setFlags(grade_item.flags() & ~Qt.ItemIsEditable)  # 不可编辑
+            self.score_table.setItem(row, 2, grade_item)
+            
+            # 获取员工现有成绩
+            employee_scores = self.score_db.get_employee_scores(employee['employee_no'], self.year)
+            score_dict = {score['assessment_item_id']: score for score in employee_scores}
+            
+            # 填充成绩项
+            for col, item_id in enumerate(self.item_columns):
+                table_col = col + 3  # 前三列是固定信息
+                
+                # 创建可编辑的成绩单元格
+                score_value = ""
+                if item_id in score_dict:
+                    score_value = str(score_dict[item_id]['score'])
+                
+                score_item = QTableWidgetItem(score_value)
+                self.score_table.setItem(row, table_col, score_item)
+        
+        # 调整列宽
+        self.score_table.resizeColumnsToContents()
+        self.score_table.setColumnWidth(0, 100)  # 工号列
+        self.score_table.setColumnWidth(1, 120)  # 姓名列
+        self.score_table.setColumnWidth(2, 80)   # 职级列
+    
+    def filter_table(self):
+        """根据搜索框筛选表格内容"""
+        search_text = self.search_edit.text().strip().lower()
+        
+        for row in range(self.score_table.rowCount()):
+            hide_row = False
+            
+            if search_text:
+                employee_no = self.score_table.item(row, 0).text().lower()
+                employee_name = self.score_table.item(row, 1).text().lower()
+                
+                if search_text not in employee_no and search_text not in employee_name:
+                    hide_row = True
+            
+            self.score_table.setRowHidden(row, hide_row)
+    
+    def save_all_scores(self):
+        """保存所有成绩"""
+        count_added = 0
+        count_updated = 0
+        
+        for row in range(self.score_table.rowCount()):
+            if self.score_table.isRowHidden(row):
+                continue
+                
+            employee_no = self.score_table.item(row, 0).text()
+            
+            for col, item_id in enumerate(self.item_columns):
+                table_col = col + 3  # 前三列是固定信息
+                
+                score_text = self.score_table.item(row, table_col).text().strip()
+                if not score_text:
+                    continue
+                    
+                try:
+                    score_value = float(score_text)
+                except ValueError:
+                    InfoBar.error(
+                        title='格式错误',
+                        content=f"第 {row+1} 行的分数格式错误，应为数字",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                    continue
+                
+                # 准备成绩数据
+                score_data = {
+                    'employee_no': employee_no,
+                    'assessment_year': self.year,
+                    'assessment_item_id': item_id,
+                    'score': score_value,
+                    'comment': ''  # 批量录入时不设置备注
+                }
+                
+                # 保存成绩
+                success = self.score_db.save_employee_score(score_data)
+                
+                if success:
+                    # 判断是新增还是更新
+                    existing_scores = self.score_db.get_employee_scores(employee_no, self.year)
+                    is_update = False
+                    for existing_score in existing_scores:
+                        if existing_score['assessment_item_id'] == item_id:
+                            is_update = True
+                            break
+                    
+                    if is_update:
+                        count_updated += 1
+                    else:
+                        count_added += 1
+        
+        # 显示保存结果
+        InfoBar.success(
+            title='保存成功',
+            content=f"成功保存 {count_added+count_updated} 项成绩 (新增: {count_added}, 更新: {count_updated})",
+            orient=Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            duration=3000,
+            parent=self
+        )
+    
+    def import_from_excel(self):
+        """从Excel导入数据"""
+        # 弹出文件选择对话框
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择导入文件", "", "Excel Files (*.xlsx *.xls);;CSV Files (*.csv)"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            import pandas as pd
+            
+            # 读取Excel文件
+            if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+                df = pd.read_excel(file_path)
+            elif file_path.endswith('.csv'):
+                df = pd.read_csv(file_path)
+            else:
+                raise ValueError("不支持的文件格式")
+                
+            # 检查必要列
+            required_columns = ['employee_no', 'assessment_name', 'score']
+            for col in required_columns:
+                if col not in df.columns:
+                    InfoBar.error(
+                        title='导入失败',
+                        content=f"导入文件缺少必要列: {col}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                    return
+                    
+            # 导入所有数据
+            result = self.score_db.import_employee_scores(file_path, self.year)
+            
+            if result and result.get('success'):
+                # 重新加载表格
+                self.load_data()
+                
+                # 显示结果
+                InfoBar.success(
+                    title='导入成功',
+                    content=f"成功导入 {result.get('added')} 条新成绩, 更新 {result.get('updated')} 条成绩",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+            else:
+                InfoBar.error(
+                    title='导入失败',
+                    content="导入失败，请检查文件格式",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+                
+        except Exception as e:
+            InfoBar.error(
+                title='导入失败',
+                content=f"导入失败: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+    
+    def export_to_excel(self):
+        """导出表格到Excel"""
+        # 弹出文件选择对话框
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "保存Excel文件", "", "Excel Files (*.xlsx);;CSV Files (*.csv)"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            import pandas as pd
+            
+            # 收集表格数据
+            data = []
+            headers = [self.score_table.horizontalHeaderItem(i).text() for i in range(self.score_table.columnCount())]
+            
+            for row in range(self.score_table.rowCount()):
+                if self.score_table.isRowHidden(row):
+                    continue
+                    
+                row_data = {}
+                for col in range(self.score_table.columnCount()):
+                    item = self.score_table.item(row, col)
+                    row_data[headers[col]] = item.text() if item else ""
+                
+                data.append(row_data)
+                
+            # 创建DataFrame
+            df = pd.DataFrame(data)
+            
+            # 导出到Excel
+            if file_path.endswith('.xlsx'):
+                df.to_excel(file_path, index=False)
+            elif file_path.endswith('.csv'):
+                df.to_csv(file_path, index=False, encoding='utf-8')
+            else:
+                # 默认添加.xlsx后缀
+                file_path += '.xlsx'
+                df.to_excel(file_path, index=False)
+                
+            InfoBar.success(
+                title='导出成功',
+                content=f"已成功导出数据到 {file_path}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            
+        except Exception as e:
+            InfoBar.error(
+                title='导出失败',
+                content=f"导出失败: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            ) 

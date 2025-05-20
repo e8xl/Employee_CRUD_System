@@ -481,7 +481,7 @@ class ScoreDatabase:
             self.conn.commit()
             
             # 获取员工姓名和考核项目名称
-            employee_name = self._get_employee_name(score_data.get('employee_no'))
+            employee_name = self.get_employee_name(score_data.get('employee_no'))
             item_name = self._get_assessment_item_name(score_data.get('assessment_item_id'))
             
             # 记录操作日志
@@ -769,14 +769,38 @@ class ScoreDatabase:
         # 如果没有匹配的阈值，返回当前职级
         return current_grade
     
-    def _get_employee_name(self, employee_no):
+    def get_employee_name(self, employee_no):
         """获取员工姓名"""
         try:
             self.cursor.execute("SELECT name FROM employees WHERE employee_no = ?", (employee_no,))
             result = self.cursor.fetchone()
             return result[0] if result else "未知员工"
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            print(f"获取员工姓名失败: {e}")
             return "未知员工"
+            
+    def get_employee_info(self, employee_no):
+        """获取员工基本信息"""
+        try:
+            self.cursor.execute("""
+            SELECT employee_no, name, department, grade_2023, grade_2024
+            FROM employees 
+            WHERE employee_no = ?
+            """, (employee_no,))
+            
+            result = self.cursor.fetchone()
+            if result:
+                return {
+                    'employee_no': result[0],
+                    'name': result[1],
+                    'department': result[2],
+                    'grade_2023': result[3],
+                    'grade_2024': result[4]
+                }
+            return None
+        except sqlite3.Error as e:
+            print(f"获取员工信息失败: {e}")
+            return None
     
     def _get_assessment_item_name(self, item_id):
         """获取考核项目名称"""
@@ -804,25 +828,46 @@ class ScoreDatabase:
     def get_all_departments(self):
         """获取系统中所有部门"""
         try:
+            # 从employees表中获取所有实际部门
             self.cursor.execute("SELECT DISTINCT department FROM employees WHERE department != '' ORDER BY department")
-            departments = [row[0] for row in self.cursor.fetchall()]
+            department_rows = self.cursor.fetchall()
+            
+            # 返回实际部门列表，如果没有则返回空列表
+            departments = [row[0] for row in department_rows]
             return departments
         except sqlite3.Error as e:
             print(f"获取部门列表失败: {e}")
+            # 发生错误时返回空列表
             return []
     
     def get_department_employees(self, department):
         """获取指定部门的所有员工"""
         try:
+            if not department:
+                print("未提供部门参数，无法获取员工")
+                return []
+                
+            print(f"正在获取{department}部门员工数据...")
+            # 修改查询，获取部门所有员工，使用department字段直接匹配
             self.cursor.execute(
-                "SELECT * FROM employees WHERE department = ? AND status = 'Active' ORDER BY name",
+                "SELECT * FROM employees WHERE department = ? ORDER BY name",
                 (department,)
             )
+            
+            rows = self.cursor.fetchall()
+            
+            # 如果没有找到员工
+            if not rows:
+                print(f"部门 {department} 无员工数据")
+                return []
+                
             columns = [desc[0] for desc in self.cursor.description]
             employees = []
-            for row in self.cursor.fetchall():
+            for row in rows:
                 employee = dict(zip(columns, row))
                 employees.append(employee)
+                
+            print(f"成功获取{department}部门员工数据: {len(employees)}人")
             return employees
         except sqlite3.Error as e:
             print(f"获取部门员工失败: {e}")
