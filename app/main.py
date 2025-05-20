@@ -1,57 +1,66 @@
-import sys
 import os
-from PyQt5.QtCore import QTranslator, QLocale
-from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import Qt, QCoreApplication
-from qfluentwidgets import setTheme, Theme, setThemeColor, InfoBar, InfoBarPosition, FluentTranslator
-from app.views.main_window import MainWindow
+import sys
+
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QApplication
+
 from app.models.database import EmployeeDatabase
 from app.models.score_database import ScoreDatabase
+from app.views.main_window import MainWindow
+
+
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径"""
+    # 判断是否为已编译的可执行文件
+    if getattr(sys, 'frozen', False):
+        # 如果是PyInstaller打包的可执行文件
+        base_path = sys._MEIPASS
+    else:
+        # 如果是在开发环境中运行
+        base_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+
+    # 组合路径并返回
+    return os.path.join(base_path, relative_path)
+
 
 def main():
-    # 创建应用程序实例
+    """应用入口"""
+    # 创建应用
     app = QApplication(sys.argv)
+
+    # 应用名称
     app.setApplicationName("员工管理系统")
-    app.setOrganizationName("Siemens")
-    
-    # 设置翻译器
-    translator = FluentTranslator(QLocale())
-    app.installTranslator(translator)
-    
-    # 设置应用主题
-    setTheme(Theme.AUTO)
-    setThemeColor('#0078d4')  # Fluent设计蓝色主题
-    
-    # 创建数据库实例
-    db = EmployeeDatabase()
-    
-    # 创建成绩数据库实例
-    score_db = ScoreDatabase()
-    
-    # 数据迁移
+    app.setApplicationDisplayName("员工管理系统")
+
+    # 设置图标
+    icon_path = get_resource_path('app/resources/images/logo.png')
+    app.setWindowIcon(QIcon(icon_path))
+
+    # 加载CSS样式
     try:
-        # 如果系统是第一次使用新的职级历史功能，提示用户迁移数据
-        db.cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='employee_grades'")
-        table_exists = db.cursor.fetchone()[0] > 0
-        
-        if table_exists:
-            db.cursor.execute("SELECT count(*) FROM employee_grades")
-            records_count = db.cursor.fetchone()[0]
-            
-            if records_count == 0:
-                # 表存在但没有记录，需要迁移
-                migrated_count = db.migrate_existing_grades()
-                if migrated_count > 0:
-                    print(f"成功迁移{migrated_count}条职级记录")
+        style_path = get_resource_path('app/resources/qss/light/style.qss')
+        if os.path.exists(style_path):
+            with open(style_path, 'r', encoding='utf-8') as f:
+                app.setStyleSheet(f.read())
     except Exception as e:
-        print(f"数据迁移错误: {e}")
-    
-    # 创建主窗口
+        print(f"加载样式表失败: {e}")
+
+    # 连接数据库
+    db = EmployeeDatabase("employee_db.sqlite")
+    score_db = ScoreDatabase("employee_db.sqlite")
+
+    # 创建并显示主窗口
     window = MainWindow(db, score_db)
+
+    # 设置默认显示员工管理页面，导航栏也选中员工管理项
+    window.navigationInterface.setCurrentItem('employees')
+    window.stackedWidget.setCurrentWidget(window.employee_list_view)
+
     window.show()
-    
-    # 运行应用程序
+
+    # 运行应用
     sys.exit(app.exec_())
 
+
 if __name__ == "__main__":
-    main() 
+    main()

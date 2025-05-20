@@ -565,7 +565,7 @@ class EmployeeDatabase:
             return migrated_count
         except Exception as e:
             print(f"迁移职级数据失败: {e}")
-            return 0
+            return 0 
     
     def update_employee_by_no(self, employee_no, updated_data, user="系统"):
         """通过员工工号更新员工信息"""

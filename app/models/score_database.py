@@ -27,11 +27,23 @@ class ScoreDatabase:
             print(f"数据库连接失败: {e}")
     
     def _create_tables(self):
-        """创建所有所需表（如果不存在）"""
+        """创建必要的数据表"""
+        # 创建部门考核项目表
         self._create_department_assessment_items_table()
+        
+        # 创建部门职级计算公式表
         self._create_department_grade_formulas_table()
+        
+        # 创建员工考核成绩表
         self._create_employee_scores_table()
+        
+        # 创建预测职级表
         self._create_predicted_grades_table()
+        
+        # 创建员工成绩详情表
+        self._create_employee_score_details_table()
+        
+        self.conn.commit()
         
     def _create_department_assessment_items_table(self):
         """创建部门考核项目表"""
@@ -111,6 +123,22 @@ class ScoreDatabase:
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"创建预测职级表失败: {e}")
+    
+    def _create_employee_score_details_table(self):
+        """创建员工成绩详情表"""
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS employee_score_details (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_no TEXT NOT NULL,
+            assessment_year INTEGER NOT NULL,
+            detail_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_no, assessment_year, detail_key)
+        )
+        ''')
+        print("成功创建employee_score_details表")
     
     def close(self):
         """关闭数据库连接"""

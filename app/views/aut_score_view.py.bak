@@ -1,0 +1,725 @@
+import os
+import datetime
+import json
+from PyQt5.QtCore import Qt, QSize, QTimer
+from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+    QSpinBox, QDoubleSpinBox, QTabWidget, QPushButton, QMessageBox,
+    QComboBox, QSplitter, QFrame, QFormLayout, QScrollArea, QAbstractItemView
+)
+from qfluentwidgets import (
+    PrimaryPushButton, ComboBox, SearchLineEdit, TreeWidget, TableWidget,
+    PushButton, SimpleCardWidget, DoubleSpinBox, InfoBar, InfoBarPosition,
+    LineEdit, SpinBox, FluentIcon as FIF, CardWidget, MessageBox
+)
+
+class AUTScoreView(QWidget):
+    """AUT部门专用成绩录入界面"""
+    
+    def __init__(self, score_db, parent=None):
+        super().__init__(parent)
+        self.score_db = score_db
+        self.current_employee_no = None
+        self.assessment_items = []
+        self.skill_items = []  # 岗位技能项目
+        self.other_skills = []  # 其他技能项目
+        
+        # 初始化界面
+        self.initUI()
+        
+        # 延迟0.5秒加载数据
+        QTimer.singleShot(500, self.initData)
+    
+    def initUI(self):
+        """初始化界面"""
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 8, 15, 15)
+        main_layout.setSpacing(8)
+        
+        # 创建紧凑的顶部控制区域
+        top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(10)
+        
+        # 部门标签 - AUT固定，使用更明显的样式
+        dept_label = QLabel("AUT部门成绩录入", self)
+        dept_label.setStyleSheet("font-weight: bold; color: #1976D2;")
+        top_layout.addWidget(dept_label)
+        
+        # 年份选择
+        top_layout.addWidget(QLabel("评分年份:"))
+        self.year_combo = ComboBox(self)
+        self.year_combo.setMaximumWidth(80)
+        current_year = datetime.datetime.now().year
+        for year in range(current_year - 1, current_year + 5):
+            self.year_combo.addItem(str(year))
+        self.year_combo.setCurrentText(str(current_year))
+        self.year_combo.currentIndexChanged.connect(self.refresh_scores)
+        top_layout.addWidget(self.year_combo)
+        
+        top_layout.addStretch(1)
+        
+        # 员工选择
+        top_layout.addWidget(QLabel("员工:"))
+        self.employee_combo = ComboBox(self)
+        self.employee_combo.setMinimumWidth(200)
+        self.employee_combo.setPlaceholderText("选择员工")
+        self.employee_combo.currentIndexChanged.connect(self.on_employee_selected)
+        top_layout.addWidget(self.employee_combo)
+        
+        main_layout.addLayout(top_layout)
+        
+        # 创建主内容区域
+        content_splitter = QSplitter(Qt.Horizontal)
+        
+        # 左侧: 岗位技能评分
+        self.skill_table = TableWidget(self)
+        self.skill_table.setColumnCount(3)
+        self.skill_table.setHorizontalHeaderLabels(['考核项目', '满分', '得分'])
+        self.skill_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.skill_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.skill_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        
+        # 左侧卡片
+        left_card = CardWidget(self)
+        left_layout = QVBoxLayout(left_card)
+        
+        skill_title = QLabel("岗位技能评分 (总分204分，占比60%)", left_card)
+        skill_title.setStyleSheet("font-weight: bold; color: #1976D2;")
+        left_layout.addWidget(skill_title)
+        
+        # 搜索框
+        self.skill_search = SearchLineEdit(left_card)
+        self.skill_search.setPlaceholderText("搜索技能项目")
+        self.skill_search.textChanged.connect(self.filter_skills)
+        left_layout.addWidget(self.skill_search)
+        
+        # 技能表格
+        left_layout.addWidget(self.skill_table)
+        
+        # 手焊单独显示
+        hand_solder_box = QGroupBox("手焊技能评分 (单独计算，占比10%)", left_card)
+        hand_solder_layout = QHBoxLayout(hand_solder_box)
+        
+        hand_solder_layout.addWidget(QLabel("手焊:"))
+        self.hand_solder_spin = DoubleSpinBox(hand_solder_box)
+        self.hand_solder_spin.setRange(0, 4)
+        self.hand_solder_spin.setSingleStep(0.5)
+        self.hand_solder_spin.setDecimals(1)
+        hand_solder_layout.addWidget(self.hand_solder_spin)
+        
+        hand_solder_layout.addWidget(QLabel("满分4分"))
+        hand_solder_layout.addStretch(1)
+        
+        left_layout.addWidget(hand_solder_box)
+        
+        content_splitter.addWidget(left_card)
+        
+        # 右侧: 其他技能评分和结果显示
+        right_card = CardWidget(self)
+        right_layout = QVBoxLayout(right_card)
+        
+        # 其他技能表单
+        other_skills_box = QGroupBox("其他技能评分", right_card)
+        skills_form = QFormLayout(other_skills_box)
+        
+        # 通用技能 (20%)
+        self.general_skill_spin = DoubleSpinBox(other_skills_box)
+        self.general_skill_spin.setRange(0, 100)
+        self.general_skill_spin.setSingleStep(1)
+        skills_form.addRow("通用技能 (20%):", self.general_skill_spin)
+        
+        # 跨部门技能 (10%)
+        self.cross_dept_skill_spin = DoubleSpinBox(other_skills_box)
+        self.cross_dept_skill_spin.setRange(0, 100)
+        self.cross_dept_skill_spin.setSingleStep(1)
+        skills_form.addRow("跨部门技能 (10%):", self.cross_dept_skill_spin)
+        
+        # 技师技能 (10%)
+        self.technician_skill_spin = DoubleSpinBox(other_skills_box)
+        self.technician_skill_spin.setRange(0, 100)
+        self.technician_skill_spin.setSingleStep(1)
+        skills_form.addRow("技师技能 (10%):", self.technician_skill_spin)
+        
+        # 管理技能 (10%)
+        self.management_skill_spin = DoubleSpinBox(other_skills_box)
+        self.management_skill_spin.setRange(0, 100)
+        self.management_skill_spin.setSingleStep(1)
+        skills_form.addRow("管理技能 (10%):", self.management_skill_spin)
+        
+        # 制度要求比例
+        self.requirement_spin = DoubleSpinBox(other_skills_box)
+        self.requirement_spin.setRange(0, 100)
+        self.requirement_spin.setSingleStep(1)
+        self.requirement_spin.setSuffix("%")
+        skills_form.addRow("制度要求比例:", self.requirement_spin)
+        
+        right_layout.addWidget(other_skills_box)
+        
+        # 结果显示区域
+        results_box = QGroupBox("计算结果", right_card)
+        results_layout = QVBoxLayout(results_box)
+        
+        self.skill_score_label = QLabel("岗位技能得分: 0/204 (0%)", results_box)
+        self.skill_score_label.setStyleSheet("font-weight: bold;")
+        results_layout.addWidget(self.skill_score_label)
+        
+        self.hand_solder_label = QLabel("手焊技能得分: 0/4 (0%)", results_box)
+        results_layout.addWidget(self.hand_solder_label)
+        
+        self.other_skills_label = QLabel("其他技能得分: 通用:0, 跨部门:0, 技师:0, 管理:0", results_box)
+        results_layout.addWidget(self.other_skills_label)
+        
+        self.requirement_label = QLabel("制度要求比例: 0%", results_box)
+        results_layout.addWidget(self.requirement_label)
+        
+        self.predicted_grade_label = QLabel("预测职级: 未评定", results_box)
+        self.predicted_grade_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #d32f2f;")
+        results_layout.addWidget(self.predicted_grade_label)
+        
+        right_layout.addWidget(results_box)
+        
+        # 计算按钮
+        calculate_layout = QHBoxLayout()
+        
+        self.calculate_btn = PrimaryPushButton("计算职级", right_card, FIF.FONT_SIZE)
+        self.calculate_btn.clicked.connect(self.calculate_grade)
+        calculate_layout.addWidget(self.calculate_btn)
+        
+        right_layout.addLayout(calculate_layout)
+        
+        # 保存按钮
+        self.save_btn = PrimaryPushButton("保存评分", right_card, FIF.SAVE)
+        self.save_btn.clicked.connect(self.save_scores)
+        right_layout.addWidget(self.save_btn)
+        
+        content_splitter.addWidget(right_card)
+        
+        # 设置分割比例
+        content_splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
+        main_layout.addWidget(content_splitter)
+    
+    def initData(self):
+        """初始化数据 - 加载员工和考核项目"""
+        # 加载AUT部门员工
+        self.load_employees()
+        
+        # 加载考核项目
+        self.load_assessment_items()
+    
+    def load_employees(self):
+        """加载AUT部门员工"""
+        self.employee_combo.clear()
+        self.employee_combo.addItem("请选择员工", None)
+        
+        try:
+            # 获取AUT部门所有员工
+            self.score_db.cursor.execute(
+                "SELECT employee_no, name FROM employees WHERE department = 'AUT' ORDER BY name"
+            )
+            employees = self.score_db.cursor.fetchall()
+            
+            for emp_no, name in employees:
+                self.employee_combo.addItem(f"{name} ({emp_no})", emp_no)
+                
+            print(f"成功加载AUT部门员工: {len(employees)}人")
+        except Exception as e:
+            print(f"加载员工失败: {e}")
+    
+    def load_assessment_items(self):
+        """加载AUT部门考核项目"""
+        try:
+            # 获取岗位技能项目
+            self.score_db.cursor.execute("""
+            SELECT id, assessment_name, max_score, category 
+            FROM department_assessment_items 
+            WHERE department = 'AUT' AND category = '岗位技能'
+            ORDER BY assessment_name
+            """)
+            self.skill_items = self.score_db.cursor.fetchall()
+            
+            # 获取手焊项目
+            self.score_db.cursor.execute("""
+            SELECT id, assessment_name, max_score 
+            FROM department_assessment_items 
+            WHERE department = 'AUT' AND category = '手焊技能'
+            """)
+            self.hand_solder_item = self.score_db.cursor.fetchone()
+            
+            # 获取其他技能项目
+            self.score_db.cursor.execute("""
+            SELECT id, assessment_name, max_score, category 
+            FROM department_assessment_items 
+            WHERE department = 'AUT' AND category IN ('通用技能', '跨部门技能', '技师技能', '管理技能')
+            """)
+            self.other_skills = self.score_db.cursor.fetchall()
+            
+            # 填充岗位技能表格
+            self.skill_table.setRowCount(len(self.skill_items))
+            for row, (item_id, name, max_score, category) in enumerate(self.skill_items):
+                # 项目名称
+                name_item = QTableWidgetItem(name)
+                name_item.setData(Qt.UserRole, item_id)
+                name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+                self.skill_table.setItem(row, 0, name_item)
+                
+                # 满分
+                max_score_item = QTableWidgetItem(str(max_score))
+                max_score_item.setFlags(max_score_item.flags() & ~Qt.ItemIsEditable)
+                self.skill_table.setItem(row, 1, max_score_item)
+                
+                # 得分 - 使用DoubleSpinBox
+                score_spin = DoubleSpinBox()
+                score_spin.setRange(0, max_score)
+                score_spin.setSingleStep(0.5)
+                score_spin.setDecimals(1)
+                self.skill_table.setCellWidget(row, 2, score_spin)
+            
+            # 调整表格尺寸
+            self.skill_table.resizeColumnsToContents()
+            self.skill_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            
+            print(f"成功加载岗位技能项目: {len(self.skill_items)}个")
+            print(f"成功加载其他技能项目: {len(self.other_skills)}个")
+            if self.hand_solder_item:
+                print(f"成功加载手焊技能项目: {self.hand_solder_item[1]}")
+            
+        except Exception as e:
+            print(f"加载考核项目失败: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def filter_skills(self):
+        """筛选技能项目"""
+        search_text = self.skill_search.text().lower()
+        
+        for row in range(self.skill_table.rowCount()):
+            item = self.skill_table.item(row, 0)
+            if not item:
+                continue
+                
+            if search_text and search_text not in item.text().lower():
+                self.skill_table.hideRow(row)
+            else:
+                self.skill_table.showRow(row)
+    
+    def on_employee_selected(self):
+        """员工选择变化处理"""
+        emp_no = self.employee_combo.currentData()
+        
+        if not emp_no:
+            self.current_employee_no = None
+            return
+            
+        self.current_employee_no = emp_no
+        self.load_scores()
+        
+        # 确认当前员工已选中
+        InfoBar.success(
+            title='已选择员工',
+            content=f'当前选择: {self.employee_combo.currentText()}',
+            parent=self,
+            position=InfoBarPosition.TOP,
+            duration=2000
+        )
+    
+    def load_scores(self):
+        """加载员工成绩"""
+        if not self.current_employee_no:
+            return
+            
+        try:
+            year = int(self.year_combo.currentText())
+            
+            # 清空所有得分
+            self.clear_scores()
+            
+            # 获取员工所有成绩
+            self.score_db.cursor.execute("""
+            SELECT s.assessment_item_id, s.score, a.category
+            FROM employee_scores s
+            JOIN department_assessment_items a ON s.assessment_item_id = a.id
+            WHERE s.employee_no = ? AND s.assessment_year = ?
+            """, (self.current_employee_no, year))
+            
+            scores = self.score_db.cursor.fetchall()
+            
+            # 设置各项目得分
+            for item_id, score, category in scores:
+                if category == '岗位技能':
+                    self.set_skill_score(item_id, score)
+                elif category == '手焊技能' and self.hand_solder_item and item_id == self.hand_solder_item[0]:
+                    self.hand_solder_spin.setValue(score)
+                elif category == '通用技能':
+                    self.general_skill_spin.setValue(score)
+                elif category == '跨部门技能':
+                    self.cross_dept_skill_spin.setValue(score)
+                elif category == '技师技能':
+                    self.technician_skill_spin.setValue(score)
+                elif category == '管理技能':
+                    self.management_skill_spin.setValue(score)
+            
+            # 获取制度要求比例
+            self.score_db.cursor.execute("""
+            SELECT value FROM employee_score_details
+            WHERE employee_no = ? AND assessment_year = ? AND detail_key = 'requirement_ratio'
+            """, (self.current_employee_no, year))
+            
+            req_result = self.score_db.cursor.fetchone()
+            if req_result:
+                self.requirement_spin.setValue(float(req_result[0]))
+            
+            # 立即计算职级
+            self.calculate_grade()
+            
+            InfoBar.success(
+                title='成功',
+                content=f'已加载员工{self.employee_combo.currentText()}的{year}年评分',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            
+        except Exception as e:
+            print(f"加载成绩失败: {e}")
+            InfoBar.error(
+                title='错误',
+                content=f'加载成绩失败: {str(e)}',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+    
+    def set_skill_score(self, item_id, score):
+        """设置岗位技能得分"""
+        for row in range(self.skill_table.rowCount()):
+            item = self.skill_table.item(row, 0)
+            if not item:
+                continue
+            
+            if item.data(Qt.UserRole) == item_id:
+                spin = self.skill_table.cellWidget(row, 2)
+                if spin:
+                    spin.setValue(score)
+                break
+    
+    def clear_scores(self):
+        """清空所有得分"""
+        # 清空岗位技能得分
+        for row in range(self.skill_table.rowCount()):
+            spin = self.skill_table.cellWidget(row, 2)
+            if spin:
+                spin.setValue(0)
+                
+        # 清空手焊技能得分
+        self.hand_solder_spin.setValue(0)
+        
+        # 清空其他技能得分
+        self.general_skill_spin.setValue(0)
+        self.cross_dept_skill_spin.setValue(0)
+        self.technician_skill_spin.setValue(0)
+        self.management_skill_spin.setValue(0)
+        
+        # 清空制度要求比例
+        self.requirement_spin.setValue(0)
+        
+        # 清空结果显示
+        self.skill_score_label.setText("岗位技能得分: 0/204 (0%)")
+        self.hand_solder_label.setText("手焊技能得分: 0/4 (0%)")
+        self.other_skills_label.setText("其他技能得分: 通用:0, 跨部门:0, 技师:0, 管理:0")
+        self.requirement_label.setText("制度要求比例: 0%")
+        self.predicted_grade_label.setText("预测职级: 未评定")
+    
+    def calculate_grade(self):
+        """计算职级"""
+        # 如果current_employee_no为None但界面已选择员工，则重新获取员工编号
+        if not self.current_employee_no and self.employee_combo.currentData():
+            self.current_employee_no = self.employee_combo.currentData()
+            
+        if not self.current_employee_no:
+            InfoBar.warning(
+                title='警告',
+                content='请先选择员工',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            return
+            
+        try:
+            # 计算岗位技能得分
+            skill_score = 0
+            skill_max_score = 204  # 51个项目×4分=204分
+            
+            for row in range(self.skill_table.rowCount()):
+                spin = self.skill_table.cellWidget(row, 2)
+                if spin:
+                    skill_score += spin.value()
+            
+            skill_ratio = skill_score / skill_max_score * 100
+            self.skill_score_label.setText(f"岗位技能得分: {skill_score:.1f}/{skill_max_score} ({skill_ratio:.1f}%)")
+            
+            # 手焊技能得分
+            hand_solder_score = self.hand_solder_spin.value()
+            hand_solder_ratio = hand_solder_score / 4 * 100
+            self.hand_solder_label.setText(f"手焊技能得分: {hand_solder_score:.1f}/4 ({hand_solder_ratio:.1f}%)")
+            
+            # 其他技能得分
+            general_score = self.general_skill_spin.value()
+            cross_dept_score = self.cross_dept_skill_spin.value()
+            technician_score = self.technician_skill_spin.value()
+            management_score = self.management_skill_spin.value()
+            
+            self.other_skills_label.setText(
+                f"其他技能得分: 通用:{general_score:.1f}, 跨部门:{cross_dept_score:.1f}, "
+                f"技师:{technician_score:.1f}, 管理:{management_score:.1f}"
+            )
+            
+            # 制度要求比例
+            requirement_ratio = self.requirement_spin.value()
+            self.requirement_label.setText(f"制度要求比例: {requirement_ratio:.1f}%")
+            
+            # 根据评定标准确定职级
+            # 岗位技能系数 = 岗位技能得分率
+            skill_coefficient = skill_ratio
+            
+            # 确定职级
+            predicted_grade = self.determine_grade(skill_coefficient, requirement_ratio)
+            self.predicted_grade_label.setText(f"预测职级: {predicted_grade}")
+            
+            # 更新界面样式
+            if predicted_grade == "J档(优秀)":
+                self.predicted_grade_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #2e7d32;")
+            elif predicted_grade == "J-档(良好)":
+                self.predicted_grade_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976D2;")
+            elif predicted_grade == "合格档":
+                self.predicted_grade_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #F57C00;")
+            elif predicted_grade == "不合格档":
+                self.predicted_grade_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #d32f2f;")
+            else:
+                self.predicted_grade_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #d32f2f;")
+            
+            return predicted_grade
+            
+        except Exception as e:
+            print(f"计算职级失败: {e}")
+            import traceback
+            traceback.print_exc()
+            InfoBar.error(
+                title='错误',
+                content=f'计算职级失败: {str(e)}',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            return "计算失败"
+    
+    def determine_grade(self, skill_coefficient, requirement_ratio):
+        """根据岗位技能系数和制度要求比例确定职级"""
+        if skill_coefficient >= 90 and 0 <= requirement_ratio <= 5:
+            return "J档(优秀)"
+        elif skill_coefficient >= 80 and 10 <= requirement_ratio <= 20:
+            return "J-档(良好)"
+        elif skill_coefficient >= 50 and 40 <= requirement_ratio <= 50:
+            return "合格档"
+        elif skill_coefficient >= 30 and 20 <= requirement_ratio <= 40:
+            return "不合格档"
+        else:
+            return "差档"
+    
+    def save_scores(self):
+        """保存评分"""
+        # 如果current_employee_no为None但界面已选择员工，则重新获取员工编号
+        if not self.current_employee_no and self.employee_combo.currentData():
+            self.current_employee_no = self.employee_combo.currentData()
+            
+        if not self.current_employee_no:
+            InfoBar.warning(
+                title='警告',
+                content='请先选择员工',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            return
+        
+        try:
+            year = int(self.year_combo.currentText())
+            saved_items = 0
+            
+            # 保存岗位技能得分
+            for row in range(self.skill_table.rowCount()):
+                item = self.skill_table.item(row, 0)
+                spin = self.skill_table.cellWidget(row, 2)
+                
+                if item and spin:
+                    item_id = item.data(Qt.UserRole)
+                    score = spin.value()
+                    
+                    score_data = {
+                        'employee_no': self.current_employee_no,
+                        'assessment_year': year,
+                        'assessment_item_id': item_id,
+                        'score': score,
+                        'comment': ''
+                    }
+                    
+                    if self.score_db.save_employee_score(score_data):
+                        saved_items += 1
+            
+            # 保存手焊技能得分
+            if self.hand_solder_item:
+                hand_solder_score = {
+                    'employee_no': self.current_employee_no,
+                    'assessment_year': year,
+                    'assessment_item_id': self.hand_solder_item[0],
+                    'score': self.hand_solder_spin.value(),
+                    'comment': ''
+                }
+                
+                if self.score_db.save_employee_score(hand_solder_score):
+                    saved_items += 1
+            
+            # 保存其他技能得分
+            for skill in self.other_skills:
+                item_id = skill[0]
+                category = skill[3]
+                
+                if category == '通用技能':
+                    score = self.general_skill_spin.value()
+                elif category == '跨部门技能':
+                    score = self.cross_dept_skill_spin.value()
+                elif category == '技师技能':
+                    score = self.technician_skill_spin.value()
+                elif category == '管理技能':
+                    score = self.management_skill_spin.value()
+                else:
+                    continue
+                
+                score_data = {
+                    'employee_no': self.current_employee_no,
+                    'assessment_year': year,
+                    'assessment_item_id': item_id,
+                    'score': score,
+                    'comment': ''
+                }
+                
+                if self.score_db.save_employee_score(score_data):
+                    saved_items += 1
+            
+            # 保存制度要求比例
+            self.score_db.cursor.execute("""
+            INSERT OR REPLACE INTO employee_score_details
+            (employee_no, assessment_year, detail_key, value)
+            VALUES (?, ?, 'requirement_ratio', ?)
+            """, (self.current_employee_no, year, self.requirement_spin.value()))
+            
+            self.score_db.conn.commit()
+            
+            # 保存预测职级
+            predicted_grade = self.calculate_grade()
+            
+            # 计算加权得分
+            skill_score = 0
+            for row in range(self.skill_table.rowCount()):
+                spin = self.skill_table.cellWidget(row, 2)
+                if spin:
+                    skill_score += spin.value()
+            
+            skill_ratio = skill_score / 204
+            hand_solder_ratio = self.hand_solder_spin.value() / 4
+            general_ratio = self.general_skill_spin.value() / 100
+            cross_dept_ratio = self.cross_dept_skill_spin.value() / 100
+            technician_ratio = self.technician_skill_spin.value() / 100
+            management_ratio = self.management_skill_spin.value() / 100
+            
+            total_weighted_score = (
+                skill_ratio * 0.6 + 
+                hand_solder_ratio * 0.1 + 
+                general_ratio * 0.2 + 
+                cross_dept_ratio * 0.1 + 
+                technician_ratio * 0.1 + 
+                management_ratio * 0.1
+            ) * 100
+            
+            # 获取员工当前职级
+            self.score_db.cursor.execute(
+                "SELECT grade_2024, grade_2023 FROM employees WHERE employee_no = ?", 
+                (self.current_employee_no,)
+            )
+            grades = self.score_db.cursor.fetchone()
+            current_grade = grades[0] if grades[0] else (grades[1] if grades[1] else "未知")
+            
+            # 构建计算详情
+            calculation_details = {
+                'scores': [
+                    {'item': '岗位技能', 'raw_score': skill_score, 'max_score': 204, 'weight': 0.6},
+                    {'item': '手焊技能', 'raw_score': self.hand_solder_spin.value(), 'max_score': 4, 'weight': 0.1},
+                    {'item': '通用技能', 'raw_score': self.general_skill_spin.value(), 'max_score': 100, 'weight': 0.2},
+                    {'item': '跨部门技能', 'raw_score': self.cross_dept_skill_spin.value(), 'max_score': 100, 'weight': 0.1},
+                    {'item': '技师技能', 'raw_score': self.technician_skill_spin.value(), 'max_score': 100, 'weight': 0.1},
+                    {'item': '管理技能', 'raw_score': self.management_skill_spin.value(), 'max_score': 100, 'weight': 0.1}
+                ],
+                'skill_coefficient': skill_ratio * 100,
+                'requirement_ratio': self.requirement_spin.value(),
+                'total': total_weighted_score,
+                'predicted_grade': predicted_grade
+            }
+            
+            # 保存预测结果
+            self.score_db.cursor.execute('''
+            INSERT OR REPLACE INTO predicted_grades (
+                employee_no, assessment_year, current_grade, 
+                predicted_grade, total_score, calculation_details
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                self.current_employee_no,
+                year,
+                current_grade,
+                predicted_grade,
+                total_weighted_score,
+                json.dumps(calculation_details)
+            ))
+            
+            self.score_db.conn.commit()
+            
+            # 记录操作日志
+            employee_name = self.employee_combo.currentText().split(" (")[0]
+            self.score_db.cursor.execute('''
+            INSERT INTO operation_logs (user, operation, details, created_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (
+                "系统",
+                "保存员工成绩",
+                f"保存员工 {employee_name} {year}年AUT成绩，共{saved_items}项，预测职级: {predicted_grade}"
+            ))
+            
+            self.score_db.conn.commit()
+            
+            InfoBar.success(
+                title='保存成功',
+                content=f'已保存员工{employee_name}的{year}年评分，共{saved_items}项',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            
+        except Exception as e:
+            print(f"保存成绩失败: {e}")
+            import traceback
+            traceback.print_exc()
+            InfoBar.error(
+                title='错误',
+                content=f'保存成绩失败: {str(e)}',
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+    
+    def refresh_scores(self):
+        """刷新成绩"""
+        if self.current_employee_no:
+            self.load_scores() 
